@@ -569,18 +569,30 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 	if !nav.Connected {
 		status = fmt.Sprintf("%d unreachable", len(nav.UnreachableRooms))
 	}
-	fmt.Printf("rooms=%d  corridors=%d  %s\n",
-		len(layout.Rooms), len(layout.Corridors), status)
+
+	// Pick a random theme.
+	themes := []*Theme{&ThemeTech, &ThemeCastle}
+	theme := themes[rng.IntN(len(themes))]
+	fmt.Printf("rooms=%d  corridors=%d  %s  theme=%s\n",
+		len(layout.Rooms), len(layout.Corridors), status, theme.Name)
 
 	m := NewMapFile()
 	m.Worldspawn.Properties["message"] = "procgen"
 
-	// Use the same geometry builders as blueprint mode.
 	gi := procgenGridInfo(layout)
 	zLo, zHi := computeZRange(layout)
 
 	buildShell(m, gi, zLo, zHi)
 	BuildGapFills(m, layout, zLo, zHi)
+
+	// Pick per-room materials from theme.
+	roomMats := make([]RoomMaterials, len(layout.Rooms))
+	for i := range layout.Rooms {
+		roomMats[i] = PickRoomMaterials(rng, theme, "building")
+	}
+
+	// Hallway materials for corridors.
+	hallMat := PickRoomMaterials(rng, theme, "hallway")
 
 	for i := range layout.Rooms {
 		p, hasPool := layout.Pools[i]
@@ -588,10 +600,10 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 		if hasPool {
 			pp = &p
 		}
-		BuildRoomBrushes(m, &layout.Rooms[i], pp)
+		BuildRoomBrushesThemed(m, &layout.Rooms[i], pp, &roomMats[i])
 	}
 	for i := range layout.Corridors {
-		BuildCorridorBrushes(m, &layout.Corridors[i], layout.Rooms)
+		BuildCorridorBrushesThemed(m, &layout.Corridors[i], layout.Rooms, &hallMat)
 	}
 
 	PopulateDM(m, layout, rng)

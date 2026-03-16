@@ -74,10 +74,18 @@ type Layout struct {
 // --- Geometry builders ---
 
 func BuildRoomBrushes(m *MapFile, room *Room, pool *Pool) {
+	BuildRoomBrushesThemed(m, room, pool, nil)
+}
+
+func BuildRoomBrushesThemed(m *MapFile, room *Room, pool *Pool, mat *RoomMaterials) {
 	x0, y0, x1, y1 := room.X0, room.Y0, room.X1, room.Y1
 	z0, z1 := room.Z0, room.Z1
 	floorTex := Textures.Floor
 	ceilTex := Textures.Ceiling
+	if mat != nil {
+		floorTex = mat.Floor
+		ceilTex = mat.Ceiling
+	}
 
 	// Ceiling.
 	m.AddBrush(AxisAlignedBox(x0, y0, z1, x1, y1, z1+Floor, ceilTex))
@@ -114,8 +122,16 @@ func BuildRoomBrushes(m *MapFile, room *Room, pool *Pool) {
 }
 
 func BuildCorridorBrushes(m *MapFile, c *Corridor, rooms []Room) {
+	BuildCorridorBrushesThemed(m, c, rooms, nil)
+}
+
+func BuildCorridorBrushesThemed(m *MapFile, c *Corridor, rooms []Room, mat *RoomMaterials) {
 	floorTex := Textures.Floor
 	ceilTex := Textures.Ceiling
+	if mat != nil {
+		floorTex = mat.Floor
+		ceilTex = mat.Ceiling
+	}
 
 	m.AddBrush(AxisAlignedBox(c.X0, c.Y0, c.Z0-Floor, c.X1, c.Y1, c.Z0, floorTex))
 	m.AddBrush(AxisAlignedBox(c.X0, c.Y0, c.Z1, c.X1, c.Y1, c.Z1+Floor, ceilTex))
