@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "The House of Chthon",
+    "author": "id Software",
+    "description": "Converted from Quake shareware e1m7.bsp",
+    "theme": "base",
+    "gamemode": "deathmatch",
+    "player_count": {
+      "min": 1,
+      "max": 4
+    },
+    "design_notes": "Auto-extracted from e1m7.bsp entity data. 3 rooms, 154 entities."
+  },
+  "rooms": [
+    {
+      "id": "room_0",
+      "role": "arena",
+      "label": "Rocket Room",
+      "size": "huge",
+      "elevation": "ground",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 2
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 4
+        },
+        {
+          "classname": "item_rockets",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "light",
+          "count": 17
+        },
+        {
+          "classname": "weapon_rocketlauncher",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "weapon_supernailgun",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    },
+    {
+      "id": "room_1",
+      "role": "control_point",
+      "label": "Start Area",
+      "size": "huge",
+      "elevation": "mid",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 4
+        },
+        {
+          "classname": "info_player_start",
+          "placement": "corner",
+          "count": 1
+        },
+        {
+          "classname": "item_artifact_super_damage",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 6
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 2
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "light",
+          "count": 37
+        },
+        {
+          "classname": "weapon_grenadelauncher",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "weapon_nailgun",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "weapon_supernailgun",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "weapon_supershotgun",
+          "placement": "center",
+          "count": 2
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn",
+        "high_value"
+      ]
+    },
+    {
+      "id": "room_2",
+      "role": "supply",
+      "label": "Lower Chamber 2",
+      "size": "medium",
+      "elevation": "low",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 1
+        },
+        {
+          "classname": "item_rockets",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "light",
+          "count": 22
+        },
+        {
+          "classname": "weapon_grenadelauncher",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "room_0",
+      "to": "room_2",
+      "type": "stairs",
+      "width": "normal"
+    },
+    {
+      "from": "room_1",
+      "to": "room_2",
+      "type": "drop",
+      "width": "normal"
+    }
+  ],
+  "flow": {
+    "primary_loop": [
+      "room_0",
+      "room_1",
+      "room_2",
+      "room_0"
+    ]
+  }
+}

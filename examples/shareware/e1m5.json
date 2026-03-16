@@ -1,0 +1,308 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "Gloom Keep",
+    "author": "id Software",
+    "description": "Converted from Quake shareware e1m5.bsp",
+    "theme": "base",
+    "gamemode": "deathmatch",
+    "player_count": {
+      "min": 1,
+      "max": 4
+    },
+    "design_notes": "Auto-extracted from e1m5.bsp entity data. 5 rooms, 461 entities."
+  },
+  "rooms": [
+    {
+      "id": "room_0",
+      "role": "arena",
+      "label": "Start Area",
+      "size": "huge",
+      "elevation": "mid",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 2
+        },
+        {
+          "classname": "info_player_start",
+          "placement": "corner",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 8
+        },
+        {
+          "classname": "item_rockets",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "light",
+          "count": 52
+        },
+        {
+          "classname": "weapon_nailgun",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "weapon_rocketlauncher",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    },
+    {
+      "id": "room_1",
+      "role": "control_point",
+      "label": "Quad Room",
+      "size": "huge",
+      "elevation": "mid",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "item_artifact_super_damage",
+          "placement": "center",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 4
+        },
+        {
+          "classname": "item_rockets",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "light",
+          "count": 33
+        }
+      ],
+      "tags": [
+        "vertical",
+        "high_value"
+      ]
+    },
+    {
+      "id": "room_2",
+      "role": "supply",
+      "label": "Room 2",
+      "size": "huge",
+      "elevation": "mid",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 3
+        },
+        {
+          "classname": "item_armor2",
+          "placement": "wall",
+          "count": 2
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 12
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 3
+        },
+        {
+          "classname": "light",
+          "count": 46
+        },
+        {
+          "classname": "weapon_grenadelauncher",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    },
+    {
+      "id": "room_3",
+      "role": "supply",
+      "label": "Room 3",
+      "size": "huge",
+      "elevation": "mid",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 3
+        },
+        {
+          "classname": "item_armor1",
+          "placement": "wall",
+          "count": 1
+        },
+        {
+          "classname": "item_armor2",
+          "placement": "wall",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 10
+        },
+        {
+          "classname": "item_shells",
+          "placement": "any",
+          "count": 6
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 2
+        },
+        {
+          "classname": "light",
+          "count": 64
+        },
+        {
+          "classname": "weapon_supershotgun",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    },
+    {
+      "id": "room_4",
+      "role": "supply",
+      "label": "Upper Chamber 4",
+      "size": "huge",
+      "elevation": "high",
+      "ceiling": "cavernous",
+      "items": [
+        {
+          "classname": "info_player_deathmatch",
+          "placement": "corner",
+          "count": 1
+        },
+        {
+          "classname": "item_health",
+          "placement": "wall",
+          "count": 4
+        },
+        {
+          "classname": "item_rockets",
+          "placement": "any",
+          "count": 2
+        },
+        {
+          "classname": "item_spikes",
+          "placement": "any",
+          "count": 1
+        },
+        {
+          "classname": "light",
+          "count": 17
+        },
+        {
+          "classname": "weapon_supernailgun",
+          "placement": "center",
+          "count": 1
+        }
+      ],
+      "tags": [
+        "loot",
+        "vertical",
+        "spawn"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "room_0",
+      "to": "room_1",
+      "type": "corridor",
+      "width": "narrow"
+    },
+    {
+      "from": "room_0",
+      "to": "room_3",
+      "type": "corridor",
+      "width": "narrow"
+    },
+    {
+      "from": "room_1",
+      "to": "room_2",
+      "type": "corridor",
+      "width": "narrow"
+    },
+    {
+      "from": "room_2",
+      "to": "room_4",
+      "type": "drop",
+      "width": "normal"
+    },
+    {
+      "from": "room_3",
+      "to": "room_4",
+      "type": "corridor",
+      "width": "narrow"
+    }
+  ],
+  "flow": {
+    "primary_loop": [
+      "room_0",
+      "room_1",
+      "room_2",
+      "room_3",
+      "room_4",
+      "room_0"
+    ]
+  }
+}

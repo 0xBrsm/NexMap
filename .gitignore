@@ -1,0 +1,4 @@
+vendor/
+src/nexmap/nexmap
+examples/shareware/bsp/
+*.log
