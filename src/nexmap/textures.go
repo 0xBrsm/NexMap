@@ -365,6 +365,12 @@ func MaterializeTextureWAD(dir string) (string, error) {
 			}
 		}
 	}
+	// Add every texture from palettes.
+	for _, pals := range [][]TexturePalette{TechPalettes, CastlePalettes} {
+		for _, p := range pals {
+			needed = append(needed, p.Wall, p.Floor, p.Ceiling, p.Trim)
+		}
+	}
 
 	var entries []struct {
 		name string
