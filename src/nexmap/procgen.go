@@ -601,6 +601,12 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 			pp = &p
 		}
 		BuildRoomBrushesThemed(m, &layout.Rooms[i], pp, &roomMats[i])
+
+		// Add architectural details.
+		details := RandomDetails(rng, &layout.Rooms[i], hasPool)
+		for _, d := range details {
+			PlaceDetail(m, &layout.Rooms[i], pp, d, &roomMats[i], rng)
+		}
 	}
 	for i := range layout.Corridors {
 		BuildCorridorBrushesThemed(m, &layout.Corridors[i], layout.Rooms, &hallMat)
