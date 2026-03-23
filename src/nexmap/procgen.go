@@ -573,14 +573,24 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 	buildShell(m, gi, zLo, zHi)
 	BuildGapFills(m, layout, zLo, zHi)
 
-	// Pick 1-2 palettes for the map. Adjacent rooms share a palette for coherence.
-	pal1 := PickPalette(rng, theme)
-	pal2 := PickPalette(rng, theme)
-	// Ensure pal2 is different from pal1.
-	pals := PalettesForTheme(theme)
-	if len(pals) > 1 {
-		for pal2.Name == pal1.Name {
-			pal2 = pals[rng.IntN(len(pals))]
+	// Try to use real map palettes from chunk library.
+	lib, libErr := LoadChunkLibrary()
+
+	var pal1, pal2 TexturePalette
+	if libErr == nil && len(lib.MapPalettes) > 0 {
+		pal1 = PickExtractedPalette(rng, lib)
+		pal2 = PickExtractedPalette(rng, lib)
+		for pal2.Name == pal1.Name && len(lib.MapPalettes) > 1 {
+			pal2 = PickExtractedPalette(rng, lib)
+		}
+	} else {
+		pal1 = PickPalette(rng, theme)
+		pal2 = PickPalette(rng, theme)
+		pals := PalettesForTheme(theme)
+		if len(pals) > 1 {
+			for pal2.Name == pal1.Name {
+				pal2 = pals[rng.IntN(len(pals))]
+			}
 		}
 	}
 

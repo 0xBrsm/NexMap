@@ -371,6 +371,14 @@ func MaterializeTextureWAD(dir string) (string, error) {
 			needed = append(needed, p.Wall, p.Floor, p.Ceiling, p.Trim)
 		}
 	}
+	// Add textures from extracted chunk library palettes.
+	if lib, err := LoadChunkLibrary(); err == nil {
+		for _, ep := range lib.MapPalettes {
+			for t := range ep.Walls { needed = append(needed, t) }
+			for t := range ep.Floors { needed = append(needed, t) }
+			for t := range ep.Ceilings { needed = append(needed, t) }
+		}
+	}
 
 	var entries []struct {
 		name string

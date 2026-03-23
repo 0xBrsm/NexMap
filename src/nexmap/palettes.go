@@ -1,6 +1,9 @@
 package main
 
-import "math/rand/v2"
+import (
+	"math/rand/v2"
+	"strings"
+)
 
 // TexturePalette is a curated set of textures that look good together.
 // Derived from analyzing which textures co-occur in original Quake maps.
@@ -89,6 +92,69 @@ func PalettesForTheme(th *Theme) []TexturePalette {
 func PickPalette(rng *rand.Rand, th *Theme) TexturePalette {
 	pals := PalettesForTheme(th)
 	return pals[rng.IntN(len(pals))]
+}
+
+// PaletteFromExtracted converts an ExtractedPalette into a TexturePalette
+// using the most common textures per surface type.
+func PaletteFromExtracted(ep *ExtractedPalette) TexturePalette {
+	topOf := func(m map[string]int) string {
+		best, bestN := "", 0
+		for k, v := range m {
+			if v > bestN {
+				best = k
+				bestN = v
+			}
+		}
+		return best
+	}
+	// Second most common wall texture as trim.
+	trimOf := func(m map[string]int, exclude string) string {
+		best, bestN := "", 0
+		for k, v := range m {
+			if k == exclude {
+				continue
+			}
+			if v > bestN {
+				best = k
+				bestN = v
+			}
+		}
+		if best == "" {
+			return exclude
+		}
+		return best
+	}
+
+	wall := topOf(ep.Walls)
+	return TexturePalette{
+		Name:    ep.MapName,
+		Wall:    wall,
+		Floor:   topOf(ep.Floors),
+		Ceiling: topOf(ep.Ceilings),
+		Trim:    trimOf(ep.Walls, wall),
+	}
+}
+
+// PickExtractedPalette selects a palette derived from a real map's textures.
+func PickExtractedPalette(rng *rand.Rand, lib *MapChunkLibrary) TexturePalette {
+	if lib == nil || len(lib.MapPalettes) == 0 {
+		return TechPalettes[0]
+	}
+	// Collect map names, preferring DM maps.
+	var dmMaps, allMaps []string
+	for name := range lib.MapPalettes {
+		allMaps = append(allMaps, name)
+		if strings.HasPrefix(name, "dm") {
+			dmMaps = append(dmMaps, name)
+		}
+	}
+	// 50% chance to pick a DM map if available.
+	pool := allMaps
+	if len(dmMaps) > 0 && rng.Float64() < 0.5 {
+		pool = dmMaps
+	}
+	chosen := pool[rng.IntN(len(pool))]
+	return PaletteFromExtracted(lib.MapPalettes[chosen])
 }
 
 // ToRoomMaterials converts a palette to RoomMaterials.
