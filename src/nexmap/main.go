@@ -22,6 +22,7 @@ func main() {
 	// Procgen options.
 	rooms := flag.Int("rooms", 3, "Max BSP subdivision depth (procgen mode)")
 	arenaSize := flag.Int("arena-size", 3072, "Arena side length in Quake units (procgen mode)")
+	remixMap := flag.String("remix", "", "Source map to remix (e.g. dm4)")
 
 	flag.Parse()
 
@@ -111,6 +112,61 @@ func main() {
 
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
+	} else if *remixMap != "" {
+		// Remix mode: tile-based generation from a source map.
+		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
+
+		// Try both PAKs.
+		var tiles []MapTile
+		for _, pakPath := range []string{
+			filepath.Join(cacheDir(), pak0Name),
+			"/data/data/com.termux/files/home/quake/id1/pak1.pak",
+		} {
+			t, err := ScanMapFromPAK(pakPath, *remixMap)
+			if err == nil && len(t) > 0 {
+				tiles = t
+				break
+			}
+		}
+		if len(tiles) == 0 {
+			fmt.Fprintf(os.Stderr, "error: no tiles found for map %s\n", *remixMap)
+			os.Exit(1)
+		}
+
+		fmt.Printf("scanned %d tiles from %s\n", len(tiles), *remixMap)
+
+		// Assemble a new map from the tiles.
+		gridSize := 4 // 4x4 grid of 256-unit tiles = 1024x1024 arena
+		if *arenaSize > 0 {
+			gridSize = *arenaSize / tileSize
+			if gridSize < 2 { gridSize = 2 }
+			if gridSize > 8 { gridSize = 8 }
+		}
+
+		tm := AssembleTileMap(rng, tiles, gridSize, gridSize)
+		m = NewMapFile()
+		m.Worldspawn.Properties["message"] = fmt.Sprintf("remix_%s_%d", *remixMap, s)
+		EmitTileMapBrushes(m, tm)
+
+		// Add player spawns and basic items.
+		for x := range tm.Width {
+			for y := range tm.Height {
+				t := &tm.Tiles[x][y]
+				if !t.Empty { continue }
+				cx := -(tm.Width*tileSize)/2 + x*tileSize + tileSize/2
+				cy := -(tm.Height*tileSize)/2 + y*tileSize + tileSize/2
+				cz := int(t.FloorZ) + 32
+				m.AddEntity("info_player_deathmatch", cx, cy, cz, map[string]string{"angle": "0"})
+				m.AddLight(cx, cy, int(t.CeilZ)-16, 200)
+			}
+		}
+		// Ensure info_player_start.
+		t0 := &tm.Tiles[0][0]
+		cx0 := -(tm.Width*tileSize)/2 + tileSize/2
+		cy0 := -(tm.Height*tileSize)/2 + tileSize/2
+		m.AddEntity("info_player_start", cx0, cy0, int(t0.FloorZ)+32, map[string]string{"angle": "0"})
+
+		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
 	} else {
 		// Procgen mode.
 		fmt.Printf("seed=%d  arena=%d  depth=%d\n", s, *arenaSize, *rooms)
