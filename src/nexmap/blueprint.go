@@ -65,6 +65,7 @@ type rawMeta struct {
 	Author      string          `json:"author,omitempty"`
 	Description string          `json:"description,omitempty"`
 	Theme       string          `json:"theme"`
+	Style       string          `json:"style,omitempty"`    // source map style (e.g. "dm4")
 	CustomTheme string          `json:"custom_theme,omitempty"`
 	Gamemode    string          `json:"gamemode"`
 	PlayerCount *rawPlayerCount `json:"player_count,omitempty"`
@@ -173,6 +174,7 @@ type ResolvedBlueprint struct {
 	Author        string
 	Description   string
 	Theme         string
+	Style         string // source map style (e.g. "dm4")
 	Gamemode      string
 	PlayerMin     int
 	PlayerMax     int
@@ -309,6 +311,7 @@ func resolveBlueprint(raw *rawBlueprint) *ResolvedBlueprint {
 		Author:      orDefault(meta.Author, "NexMap LLM"),
 		Description: meta.Description,
 		Theme:       theme,
+		Style:       meta.Style,
 		Gamemode:    meta.Gamemode,
 		PlayerMin:   playerMin,
 		PlayerMax:   playerMax,

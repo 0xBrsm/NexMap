@@ -73,6 +73,21 @@ func main() {
 		m.Worldspawn.Properties["message"] = resolved.Name
 
 		th := GetTheme(resolved.Theme)
+
+		// If style references a source map, override the theme with its palette.
+		if resolved.Style != "" {
+			if lib, err := LoadChunkLibrary(); err == nil {
+				if ep, ok := lib.MapPalettes[resolved.Style]; ok {
+					pal := PaletteFromExtracted(ep)
+					fmt.Printf("style: %s (wall=%s floor=%s ceil=%s)\n", resolved.Style, pal.Wall, pal.Floor, pal.Ceiling)
+					// Override the default textures so all geometry uses this palette.
+					Textures.Floor = pal.Floor
+					Textures.Ceiling = pal.Ceiling
+					Textures.Shell = pal.Trim
+					Textures.Fill = pal.Wall
+				}
+			}
+		}
 		var roomEnvs []string
 		var roomDetails [][]Detail
 		for _, br := range resolved.Rooms {

@@ -608,6 +608,10 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 	// Hallway materials: use trim from primary palette.
 	hallMat := RoomMaterials{Wall: pal1.Trim, Floor: pal1.Floor, Ceiling: pal1.Ceiling}
 
+	// Check if source palettes have wall features to inform detail selection.
+	pal1HasFeatures := chunkHasFeatures(lib, pal1.Name)
+	pal2HasFeatures := chunkHasFeatures(lib, pal2.Name)
+
 	for i := range layout.Rooms {
 		p, hasPool := layout.Pools[i]
 		var pp *Pool
@@ -616,8 +620,12 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 		}
 		BuildRoomBrushesThemed(m, &layout.Rooms[i], pp, &roomMats[i])
 
-		// Add architectural details.
-		details := RandomDetails(rng, &layout.Rooms[i], hasPool)
+		// Pick details biased by source map's architectural features.
+		hasFeatures := pal1HasFeatures
+		if i%2 != 0 {
+			hasFeatures = pal2HasFeatures
+		}
+		details := ChunkAwareDetails(rng, &layout.Rooms[i], hasPool, hasFeatures)
 		for _, d := range details {
 			PlaceDetail(m, &layout.Rooms[i], pp, d, &roomMats[i], rng)
 		}

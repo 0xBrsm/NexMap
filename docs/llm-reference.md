@@ -11,6 +11,7 @@ available themes, textures, architectural details, and entities.
   "meta": {
     "name": "Map Name",
     "theme": "tech",
+    "style": "dm4",
     "gamemode": "deathmatch",
     "player_count": {"min": 2, "max": 8},
     "arena_size": 3072,
@@ -23,6 +24,14 @@ available themes, textures, architectural details, and entities.
 ```
 
 ## Themes
+
+### `style` field (optional)
+Reference a specific Quake map to use its exact texture palette:
+`dm1` through `dm6` (deathmatch), `e1m1` through `e4m8` (episodes), `start`.
+Example: `"style": "dm4"` uses dm4's textures (dark metal with copper floors).
+If omitted, the compiler picks palettes from the theme's pool.
+
+### Theme presets
 
 ### `tech` (aliases: `base`)
 Industrial/military. Metal walls, tech panels, grated floors.
