@@ -113,59 +113,47 @@ func main() {
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
 	} else if *remixMap != "" {
-		// Remix mode: tile-based generation from a source map.
+		// Remix mode: procgen layout with real room geometry from source .map files.
 		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
 
-		// Try both PAKs.
-		var tiles []MapTile
-		for _, pakPath := range []string{
-			filepath.Join(cacheDir(), pak0Name),
-			"/data/data/com.termux/files/home/quake/id1/pak1.pak",
-		} {
-			t, err := ScanMapFromPAK(pakPath, *remixMap)
-			if err == nil && len(t) > 0 {
-				tiles = t
-				break
+		// Prefer .map source files for real brush geometry.
+		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
+		var sourceRooms []SourceRoom
+
+		mapRooms, err := ScanSourceRoomsFromMapFile(mapSourceDir, *remixMap)
+		if err == nil && len(mapRooms) > 0 {
+			sourceRooms = mapRooms
+			fmt.Printf("extracted %d room templates from %s.map\n", len(sourceRooms), *remixMap)
+		} else {
+			// Fall back to PAK-based extraction.
+			fmt.Printf("no .map source for %s (%v), falling back to PAK\n", *remixMap, err)
+			for _, pakPath := range []string{
+				filepath.Join(cacheDir(), pak0Name),
+				"/data/data/com.termux/files/home/quake/id1/pak1.pak",
+			} {
+				r, err := ScanSourceRoomsFromPAK(pakPath, *remixMap)
+				if err == nil && len(r) > 0 {
+					sourceRooms = r
+					break
+				}
 			}
 		}
-		if len(tiles) == 0 {
-			fmt.Fprintf(os.Stderr, "error: no tiles found for map %s\n", *remixMap)
+
+		if len(sourceRooms) == 0 {
+			fmt.Fprintf(os.Stderr, "error: no rooms found in map %s\n", *remixMap)
 			os.Exit(1)
 		}
 
-		fmt.Printf("scanned %d tiles from %s\n", len(tiles), *remixMap)
-
-		// Assemble a new map from the tiles.
-		gridSize := 4 // 4x4 grid of 256-unit tiles = 1024x1024 arena
-		if *arenaSize > 0 {
-			gridSize = *arenaSize / tileSize
-			if gridSize < 2 { gridSize = 2 }
-			if gridSize > 8 { gridSize = 8 }
-		}
-
-		tm := AssembleTileMap(rng, tiles, gridSize, gridSize)
-		m = NewMapFile()
-		m.Worldspawn.Properties["message"] = fmt.Sprintf("remix_%s_%d", *remixMap, s)
-		EmitTileMapBrushes(m, tm)
-
-		// Add player spawns and basic items.
-		for x := range tm.Width {
-			for y := range tm.Height {
-				t := &tm.Tiles[x][y]
-				if !t.Empty { continue }
-				cx := -(tm.Width*tileSize)/2 + x*tileSize + tileSize/2
-				cy := -(tm.Height*tileSize)/2 + y*tileSize + tileSize/2
-				cz := int(t.FloorZ) + 32
-				m.AddEntity("info_player_deathmatch", cx, cy, cz, map[string]string{"angle": "0"})
-				m.AddLight(cx, cy, int(t.CeilZ)-16, 200)
+		for i, sr := range sourceRooms {
+			hasBrushes := ""
+			if sr.Template != nil {
+				hasBrushes = fmt.Sprintf(" (%d brushes)", len(sr.Template.Brushes))
 			}
+			fmt.Printf("  room %d: %dx%d wall=%s floor=%s ceil=%s%s\n",
+				i, sr.Width, sr.Height, sr.WallTex, sr.FloorTex, sr.CeilTex, hasBrushes)
 		}
-		// Ensure info_player_start.
-		t0 := &tm.Tiles[0][0]
-		cx0 := -(tm.Width*tileSize)/2 + tileSize/2
-		cy0 := -(tm.Height*tileSize)/2 + tileSize/2
-		m.AddEntity("info_player_start", cx0, cy0, int(t0.FloorZ)+32, map[string]string{"angle": "0"})
 
+		m, _ = RemixMap(rng, sourceRooms, *arenaSize, *rooms)
 		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
 	} else {
 		// Procgen mode.
