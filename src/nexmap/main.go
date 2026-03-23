@@ -113,47 +113,33 @@ func main() {
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
 	} else if *remixMap != "" {
-		// Remix mode: procgen layout with real room geometry from source .map files.
+		// Remix mode: assemble real brush geometry from .map source files.
 		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
 
-		// Prefer .map source files for real brush geometry.
 		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
-		var sourceRooms []SourceRoom
-
-		mapRooms, err := ScanSourceRoomsFromMapFile(mapSourceDir, *remixMap)
-		if err == nil && len(mapRooms) > 0 {
-			sourceRooms = mapRooms
-			fmt.Printf("extracted %d room templates from %s.map\n", len(sourceRooms), *remixMap)
-		} else {
-			// Fall back to PAK-based extraction.
-			fmt.Printf("no .map source for %s (%v), falling back to PAK\n", *remixMap, err)
-			for _, pakPath := range []string{
-				filepath.Join(cacheDir(), pak0Name),
-				"/data/data/com.termux/files/home/quake/id1/pak1.pak",
-			} {
-				r, err := ScanSourceRoomsFromPAK(pakPath, *remixMap)
-				if err == nil && len(r) > 0 {
-					sourceRooms = r
-					break
-				}
-			}
-		}
-
-		if len(sourceRooms) == 0 {
-			fmt.Fprintf(os.Stderr, "error: no rooms found in map %s\n", *remixMap)
+		templates, err := LoadMapSourceRooms(mapSourceDir, *remixMap)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 
-		for i, sr := range sourceRooms {
-			hasBrushes := ""
-			if sr.Template != nil {
-				hasBrushes = fmt.Sprintf(" (%d brushes)", len(sr.Template.Brushes))
-			}
-			fmt.Printf("  room %d: %dx%d wall=%s floor=%s ceil=%s%s\n",
-				i, sr.Width, sr.Height, sr.WallTex, sr.FloorTex, sr.CeilTex, hasBrushes)
+		for i, t := range templates {
+			wall, _, _ := DominantTextures(&t)
+			fmt.Printf("  room %d: %.0fx%.0f  %d brushes  wall=%s\n",
+				i, t.Width(), t.Height(), len(t.Brushes), wall)
 		}
 
-		m, _ = RemixMap(rng, sourceRooms, *arenaSize, *rooms)
+		// TODO: assemble templates into new layout directly (no procgen middleman)
+		// For now, emit all templates at their original positions as a baseline.
+		m = NewMapFile()
+		m.Worldspawn.Properties["message"] = fmt.Sprintf("remix_%s", *remixMap)
+		for _, t := range templates {
+			translated := TranslateBrushes(t.Brushes, 0, 0, 0)
+			for _, b := range translated {
+				m.AddBrush(b)
+			}
+		}
+
 		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
 	} else {
 		// Procgen mode.
