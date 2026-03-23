@@ -95,8 +95,28 @@ func EnsureQuakeTextures() (map[string][]byte, error) {
 		return nil, fmt.Errorf("parse pak0.pak: %w", err)
 	}
 
+	// Also load textures from pak1.pak (registered version) if available.
+	pak1Paths := []string{
+		filepath.Join(filepath.Dir(filepath.Dir(dir)), "quake", "id1", "pak1.pak"),
+		"/data/data/com.termux/files/home/quake/id1/pak1.pak",
+	}
+	for _, p := range pak1Paths {
+		if pak1Data, err := os.ReadFile(p); err == nil {
+			pak1Tex, err := extractTexturesFromPAK(pak1Data)
+			if err == nil {
+				for k, v := range pak1Tex {
+					if _, exists := texMap[k]; !exists {
+						texMap[k] = v
+					}
+				}
+				fmt.Printf("loaded %d additional textures from pak1.pak\n", len(pak1Tex))
+			}
+			break
+		}
+	}
+
 	quakeTexCache = texMap
-	fmt.Printf("loaded %d Quake textures from pak0.pak\n", len(texMap))
+	fmt.Printf("loaded %d Quake textures total\n", len(texMap))
 	return quakeTexCache, nil
 }
 
