@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"math"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 )
@@ -517,28 +517,132 @@ func LoadMapSourceRooms(mapDir, mapName string) ([]RoomTemplate, error) {
 	return ExtractRoomTemplates(path, mapName)
 }
 
-// MatchTemplatesByArea returns the closest-area source templates for a
-// target area, with some randomness in the top 3.
-func MatchTemplatesByArea(templates []RoomTemplate, targetArea int, n int) []int {
-	type match struct {
-		idx  int
-		diff int
-	}
-	matches := make([]match, len(templates))
-	for i, t := range templates {
-		srcArea := int(t.Width() * t.Height())
-		d := targetArea - srcArea
-		if d < 0 { d = -d }
-		matches[i] = match{i, d}
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].diff < matches[j].diff
-	})
+// --- POC remix: stock map + one bolted-on room ---
 
-	topN := min(n, len(matches))
-	result := make([]int, topN)
-	for i := 0; i < topN; i++ {
-		result[i] = matches[i].idx
+// RemixPOC takes a source .map, keeps it intact, and bolts on one extra room
+// from its own room templates, connected by a corridor.
+func RemixPOC(mapDir, mapName string, rng *rand.Rand) (*MapFile, error) {
+	path := filepath.Join(mapDir, mapName+".map")
+	entities, err := ParseMapFile(path)
+	if err != nil {
+		return nil, err
 	}
-	return result
+
+	templates, err := ExtractRoomTemplates(path, mapName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Emit the entire original map (brushes + entities).
+	m := NewMapFile()
+	var mapBounds BBox
+	mapBoundsInit := false
+
+	for _, ent := range entities {
+		if ent.Properties["classname"] == "worldspawn" {
+			// Copy worldspawn properties.
+			for k, v := range ent.Properties {
+				if k == "wad" {
+					continue // we provide our own WAD
+				}
+				m.Worldspawn.Properties[k] = v
+			}
+			// Copy all worldspawn brushes.
+			for _, pb := range ent.Brushes {
+				bb := BrushBounds(&pb)
+				if !mapBoundsInit {
+					mapBounds = bb
+					mapBoundsInit = true
+				} else {
+					mapBounds.Expand(bb)
+				}
+				brushes := TranslateBrushes([]ParsedBrush{pb}, 0, 0, 0)
+				m.AddBrush(brushes[0])
+			}
+			continue
+		}
+		// Copy point entities (lights, items, spawns, etc).
+		out := Entity{Properties: map[string]string{}}
+		for k, v := range ent.Properties {
+			out.Properties[k] = v
+		}
+		// Copy brush entities (triggers, doors, etc).
+		for _, pb := range ent.Brushes {
+			brushes := TranslateBrushes([]ParsedBrush{pb}, 0, 0, 0)
+			out.Brushes = append(out.Brushes, brushes[0])
+		}
+		m.Entities = append(m.Entities, out)
+	}
+
+	m.Worldspawn.Properties["message"] = fmt.Sprintf("remix_%s", mapName)
+
+	// Pick a room template to bolt on (skip tiny fragments).
+	var pick *RoomTemplate
+	for i := range templates {
+		if templates[i].Width() >= 256 && templates[i].Height() >= 256 {
+			pick = &templates[i]
+			break
+		}
+	}
+	if pick == nil {
+		return m, nil // no suitable room, return stock map
+	}
+
+	// Place the new room east of the map's bounding box.
+	gap := 128.0 // corridor length
+	corridorW := 128
+	corridorH := 192 // corridor height (floor to ceiling)
+
+	newRoomX := mapBounds.MaxX + gap + float64(corridorW)
+	dx := newRoomX - pick.Bounds.MinX
+	// Center Y on the map's center.
+	dy := mapBounds.CenterY() - (pick.Bounds.MinY+pick.Bounds.MaxY)/2
+	// Align floor to map's mid-Z.
+	srcFloorZ := pick.Bounds.MinZ
+	targetFloorZ := (mapBounds.MinZ + mapBounds.MaxZ) / 2
+	dz := targetFloorZ - srcFloorZ
+
+	fmt.Printf("  bolting room %d (%.0fx%.0f, %d brushes) at dx=%.0f dy=%.0f dz=%.0f\n",
+		pick.Index, pick.Width(), pick.Height(), len(pick.Brushes), dx, dy, dz)
+
+	translated := TranslateBrushes(pick.Brushes, dx, dy, dz)
+	for _, b := range translated {
+		m.AddBrush(b)
+	}
+
+	// Build corridor connecting the map's east edge to the new room's west edge.
+	corridorX0 := int(mapBounds.MaxX)
+	corridorX1 := int(newRoomX)
+	corridorY0 := int(mapBounds.CenterY()) - corridorW/2
+	corridorY1 := corridorY0 + corridorW
+	corridorZ0 := int(targetFloorZ)
+	corridorZ1 := corridorZ0 + corridorH
+
+	wall, _, _ := DominantTextures(pick)
+	thickness := 16
+
+	// Floor
+	m.AddBrush(AxisAlignedBox(corridorX0, corridorY0-thickness, corridorZ0-thickness,
+		corridorX1, corridorY1+thickness, corridorZ0, wall))
+	// Ceiling
+	m.AddBrush(AxisAlignedBox(corridorX0, corridorY0-thickness, corridorZ1,
+		corridorX1, corridorY1+thickness, corridorZ1+thickness, wall))
+	// North wall
+	m.AddBrush(AxisAlignedBox(corridorX0, corridorY1, corridorZ0,
+		corridorX1, corridorY1+thickness, corridorZ1, wall))
+	// South wall
+	m.AddBrush(AxisAlignedBox(corridorX0, corridorY0-thickness, corridorZ0,
+		corridorX1, corridorY0, corridorZ1, wall))
+
+	// Add a light in the corridor.
+	m.AddLight((corridorX0+corridorX1)/2, (corridorY0+corridorY1)/2, corridorZ1-32, 200)
+
+	// Add a spawn point and light in the new room.
+	newRoomCX := int(pick.Bounds.CenterX() + dx)
+	newRoomCY := int(pick.Bounds.CenterY() + dy)
+	newRoomFloor := int(targetFloorZ) + 24
+	m.AddEntity("info_player_deathmatch", newRoomCX, newRoomCY, newRoomFloor, nil)
+	m.AddLight(newRoomCX, newRoomCY, int(targetFloorZ)+160, 300)
+
+	return m, nil
 }

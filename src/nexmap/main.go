@@ -113,31 +113,15 @@ func main() {
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
 	} else if *remixMap != "" {
-		// Remix mode: assemble real brush geometry from .map source files.
+		// Remix mode: stock map + bolted-on room.
 		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
 
 		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
-		templates, err := LoadMapSourceRooms(mapSourceDir, *remixMap)
+		var err error
+		m, err = RemixPOC(mapSourceDir, *remixMap, rng)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
-		}
-
-		for i, t := range templates {
-			wall, _, _ := DominantTextures(&t)
-			fmt.Printf("  room %d: %.0fx%.0f  %d brushes  wall=%s\n",
-				i, t.Width(), t.Height(), len(t.Brushes), wall)
-		}
-
-		// TODO: assemble templates into new layout directly (no procgen middleman)
-		// For now, emit all templates at their original positions as a baseline.
-		m = NewMapFile()
-		m.Worldspawn.Properties["message"] = fmt.Sprintf("remix_%s", *remixMap)
-		for _, t := range templates {
-			translated := TranslateBrushes(t.Brushes, 0, 0, 0)
-			for _, b := range translated {
-				m.AddBrush(b)
-			}
 		}
 
 		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
