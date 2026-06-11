@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Design corpus over the original id Quake .map sources.
+"""Design corpus over Quake .map sources (id originals + tagged extras).
 
 ingest:  parse all .map files into a sqlite db (~/.cache/nexmap/corpus.db)
 queries: themes, role, pairs, lights, dims, ents, sql
+         queries default to --source id; pass --source udob|ad|all to widen
 """
 
 import json
@@ -12,8 +13,26 @@ import re
 import sqlite3
 import sys
 
-CORPUS_DIR = os.path.expanduser("~/.cache/nexmap/quake_map_source")
-DB_PATH = os.path.expanduser("~/.cache/nexmap/corpus.db")
+CACHE_DIR = os.path.expanduser("~/.cache/nexmap")
+CORPUS_DIR = os.path.join(CACHE_DIR, "quake_map_source")
+DB_PATH = os.path.join(CACHE_DIR, "corpus.db")
+
+# (source, dir, progs) — id must stay first: its texture set must be known
+# before stock_tex_pct can be computed for the other sources.
+SOURCES = [
+    ("id", CORPUS_DIR, "vanilla"),
+    ("udob", os.path.join(CACHE_DIR, "sources/udob"), "copper"),
+    ("ad", os.path.join(CACHE_DIR, "sources/ad"), "ad"),
+]
+
+# BSP2-format maps per scan of the shipped paks; everything else is format 29.
+BSP2 = {"ad/ad_azad", "ad/ad_crucial", "ad/ad_magna",
+        "ad/ad_sepulcher", "ad/ad_swampy", "ad/ad_tfuma"}
+
+# Dimension of the Past ships compiled bsps only (no sources), but it is
+# vanilla-progs + stock-texture, so it's tagged into maps for the playable set.
+DOPA_MAPS = ["start", "e5m1", "e5m2", "e5m3", "e5m4",
+             "e5m5", "e5m6", "e5m7", "e5m8", "e5end", "e5dm"]
 
 # ---------------------------------------------------------------- parsing
 
@@ -95,7 +114,8 @@ def family(tex):
 
 
 SCHEMA = """
-CREATE TABLE maps(id INTEGER PRIMARY KEY, name TEXT, message TEXT, worldtype TEXT);
+CREATE TABLE maps(id INTEGER PRIMARY KEY, name TEXT, message TEXT, worldtype TEXT,
+    source TEXT, progs TEXT, bsp_format TEXT, stock_tex_pct REAL, engine_needs TEXT);
 CREATE TABLE entities(id INTEGER PRIMARY KEY, map_id INT, classname TEXT,
     keys TEXT, x REAL, y REAL, z REAL);
 CREATE TABLE brushes(id INTEGER PRIMARY KEY, map_id INT, entity_id INT,
@@ -111,58 +131,95 @@ CREATE INDEX idx_ents_class ON entities(classname);
 
 
 def ingest():
-    maps = sorted(
-        f for f in os.listdir(CORPUS_DIR)
-        if f.endswith(".map")
-    )
-    if not maps:
-        sys.exit(f"no .map files in {CORPUS_DIR}")
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
     db = sqlite3.connect(DB_PATH)
     db.executescript(SCHEMA)
-    for fname in maps:
-        name = fname[:-4]
-        ents = parse_map(os.path.join(CORPUS_DIR, fname))
-        world = ents[0][0] if ents else {}
-        cur = db.execute(
-            "INSERT INTO maps(name, message, worldtype) VALUES(?,?,?)",
-            (name, world.get("message", ""), world.get("worldtype", "")),
+    id_textures = set()
+    for source, dirpath, progs in SOURCES:
+        maps = sorted(
+            f for f in os.listdir(dirpath)
+            if f.endswith(".map")
+        ) if os.path.isdir(dirpath) else []
+        if not maps:
+            sys.exit(f"no .map files in {dirpath}")
+        for fname in maps:
+            ingest_map(db, source, dirpath, fname, progs, id_textures)
+    for base in DOPA_MAPS:
+        db.execute(
+            "INSERT INTO maps(name, message, worldtype, source, progs,"
+            " bsp_format, stock_tex_pct, engine_needs)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (f"dopa/{base}", "", "", "dopa", "vanilla", "29", 100.0, ""),
         )
-        map_id = cur.lastrowid
-        nb = nf = 0
-        for keys, brushes in ents:
-            org = keys.get("origin", "").split()
-            x, y, z = (float(v) for v in org) if len(org) == 3 else (None,) * 3
-            cur = db.execute(
-                "INSERT INTO entities(map_id, classname, keys, x, y, z)"
-                " VALUES(?,?,?,?,?,?)",
-                (map_id, keys.get("classname", ""), json.dumps(keys), x, y, z),
-            )
-            ent_id = cur.lastrowid
-            for brush in brushes:
-                pts = [p for f in brush for p in f[:3]]
-                mn = [min(p[i] for p in pts) for i in range(3)]
-                mx = [max(p[i] for p in pts) for i in range(3)]
-                cur = db.execute(
-                    "INSERT INTO brushes(map_id, entity_id, minx, miny, minz,"
-                    " maxx, maxy, maxz, dx, dy, dz) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                    (map_id, ent_id, *mn, *mx,
-                     mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]),
-                )
-                brush_id = cur.lastrowid
-                for p0, p1, p2, tex in brush:
-                    n = outward_normal(p0, p1, p2)
-                    db.execute(
-                        "INSERT INTO faces(brush_id, map_id, texture, family,"
-                        " nx, ny, nz, orient) VALUES(?,?,?,?,?,?,?,?)",
-                        (brush_id, map_id, tex, family(tex), *n, orient(n[2])),
-                    )
-                    nf += 1
-                nb += 1
-        print(f"{name}: {nb} brushes, {nf} faces, {len(ents)} entities")
     db.commit()
     print(f"-> {DB_PATH}")
+
+
+def ingest_map(db, source, dirpath, fname, progs, id_textures):
+    base = fname[:-4]
+    name = base if source == "id" else f"{source}/{base}"
+    ents = parse_map(os.path.join(dirpath, fname))
+    world = ents[0][0] if ents else {}
+    cur = db.execute(
+        "INSERT INTO maps(name, message, worldtype, source, progs, bsp_format)"
+        " VALUES(?,?,?,?,?,?)",
+        (name, world.get("message", ""), world.get("worldtype", ""),
+         source, progs, "bsp2" if name in BSP2 else "29"),
+    )
+    map_id = cur.lastrowid
+    needs = set()
+    if name in BSP2:
+        needs.add("bsp2")
+    if any(k.startswith("fog") or k == "_skyfog" for k in world):
+        needs.add("fog")
+    seen_tex, stock_faces = set(), 0
+    nb = nf = 0
+    for keys, brushes in ents:
+        org = keys.get("origin", "").split()
+        x, y, z = (float(v) for v in org) if len(org) == 3 else (None,) * 3
+        cur = db.execute(
+            "INSERT INTO entities(map_id, classname, keys, x, y, z)"
+            " VALUES(?,?,?,?,?,?)",
+            (map_id, keys.get("classname", ""), json.dumps(keys), x, y, z),
+        )
+        ent_id = cur.lastrowid
+        for brush in brushes:
+            pts = [p for f in brush for p in f[:3]]
+            mn = [min(p[i] for p in pts) for i in range(3)]
+            mx = [max(p[i] for p in pts) for i in range(3)]
+            cur = db.execute(
+                "INSERT INTO brushes(map_id, entity_id, minx, miny, minz,"
+                " maxx, maxy, maxz, dx, dy, dz) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (map_id, ent_id, *mn, *mx,
+                 mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]),
+            )
+            brush_id = cur.lastrowid
+            for p0, p1, p2, tex in brush:
+                n = outward_normal(p0, p1, p2)
+                db.execute(
+                    "INSERT INTO faces(brush_id, map_id, texture, family,"
+                    " nx, ny, nz, orient) VALUES(?,?,?,?,?,?,?,?)",
+                    (brush_id, map_id, tex, family(tex), *n, orient(n[2])),
+                )
+                seen_tex.add(tex)
+                if tex.startswith("{"):
+                    needs.add("fence")
+                if tex in id_textures:
+                    stock_faces += 1
+                nf += 1
+            nb += 1
+    if source == "id":
+        id_textures |= seen_tex
+        pct = 100.0
+    else:
+        pct = round(100.0 * stock_faces / nf, 1) if nf else 0.0
+    db.execute(
+        "UPDATE maps SET stock_tex_pct=?, engine_needs=? WHERE id=?",
+        (pct, ",".join(sorted(needs)), map_id),
+    )
+    print(f"{name}: {nb} brushes, {nf} faces, {len(ents)} entities,"
+          f" stock={pct:.0f}% needs=[{','.join(sorted(needs))}]")
 
 
 # ---------------------------------------------------------------- queries
@@ -174,23 +231,37 @@ def connect():
 
 
 def map_filter(args):
-    """Returns (sql_clause, params) for an optional map name argument."""
+    """(sql_clause, params) for optional --map <name> / --source <src|all>.
+
+    Defaults to --source id so the stats the quake-mapping skill was distilled
+    from stay uncontaminated by the tagged extras (udob/ad).
+    """
+    clause, params, src = "", [], "id"
     for i, a in enumerate(args):
         if a == "--map":
-            return " AND map_id=(SELECT id FROM maps WHERE name=?)", [args[i + 1]]
-    return "", []
+            clause = " AND map_id=(SELECT id FROM maps WHERE name=?)"
+            params = [args[i + 1]]
+            src = "all"  # an explicit map already pins the source
+        elif a == "--source":
+            src = args[i + 1]
+    if src != "all":
+        clause += " AND map_id IN (SELECT id FROM maps WHERE source=?)"
+        params.append(src)
+    return clause, params
 
 
 def cmd_themes(args):
     db = connect()
-    rows = db.execute("""
+    mf, mp = map_filter(args)
+    rows = db.execute(f"""
         SELECT m.name, f.family, COUNT(*) c
         FROM faces f JOIN maps m ON m.id = f.map_id
-        GROUP BY m.name, f.family ORDER BY m.name, c DESC""").fetchall()
+        WHERE 1=1 {mf.replace('map_id', 'f.map_id')}
+        GROUP BY m.name, f.family ORDER BY m.name, c DESC""", mp).fetchall()
     bymap = {}
     for name, fam, c in rows:
         bymap.setdefault(name, []).append((fam, c))
-    only = args[0] if args else None
+    only = args[0] if args and not args[0].startswith("--") else None
     for name, fams in bymap.items():
         if only and name != only:
             continue
@@ -204,10 +275,11 @@ def cmd_role(args):
         sys.exit("usage: role <texture-or-family>")
     db = connect()
     t = args[0].lower()
-    rows = db.execute("""
+    mf, mp = map_filter(args)
+    rows = db.execute(f"""
         SELECT texture, orient, COUNT(*) FROM faces
-        WHERE texture = ? OR family = ?
-        GROUP BY texture, orient ORDER BY texture""", (t, t)).fetchall()
+        WHERE (texture = ? OR family = ?) {mf}
+        GROUP BY texture, orient ORDER BY texture""", [t, t] + mp).fetchall()
     agg = {}
     for tex, o, c in rows:
         agg.setdefault(tex, {})[o] = c
@@ -325,11 +397,12 @@ def cmd_dims(args):
 
 def cmd_ents(args):
     db = connect()
-    pat = (args[0] if args else "") + "%"
-    rows = db.execute("""
+    pat = (args[0] if args and not args[0].startswith("--") else "") + "%"
+    mf, mp = map_filter(args)
+    rows = db.execute(f"""
         SELECT e.classname, COUNT(*) total, COUNT(DISTINCT e.map_id) nmaps
-        FROM entities e WHERE e.classname LIKE ?
-        GROUP BY e.classname ORDER BY total DESC""", (pat,)).fetchall()
+        FROM entities e WHERE e.classname LIKE ? {mf.replace('map_id', 'e.map_id')}
+        GROUP BY e.classname ORDER BY total DESC""", [pat] + mp).fetchall()
     for cls, total, nmaps in rows:
         print(f"{cls:32} total={total:4}  maps={nmaps}")
 
