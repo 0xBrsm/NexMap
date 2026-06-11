@@ -18,13 +18,45 @@ func main() {
 	bspMode := flag.Bool("bsp", false, "Output .bsp directly (no external tools needed)")
 	compileMode := flag.Bool("compile", false, "Output .map then compile with qbsp/vis/light (ericw-tools)")
 	extractBP := flag.String("extract-blueprints", "", "Extract shareware maps to blueprint JSON files in the given directory")
+	renderBSP := flag.String("render", "", "Render PNG screenshots of a .bsp file")
+	cams := flag.String("cams", "", "Cameras as 'x y z yaw pitch[;...]' (default: overview + spawns)")
+	shotSize := flag.String("size", "960x540", "Screenshot size WxH")
+	gamma := flag.Float64("gamma", 1.3, "Screenshot gamma")
 
 	// Procgen options.
 	rooms := flag.Int("rooms", 3, "Max BSP subdivision depth (procgen mode)")
 	arenaSize := flag.Int("arena-size", 3072, "Arena side length in Quake units (procgen mode)")
 	remixMap := flag.String("remix", "", "Source map to remix (e.g. dm4)")
+	buildLib := flag.Bool("build-library", false, "Build brush library from .map sources and print stats")
 
 	flag.Parse()
+
+	if *buildLib {
+		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
+		lib, err := BuildBrushLibrary(mapSourceDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		// Print style breakdown.
+		for style, indices := range lib.ByStyle {
+			fmt.Printf("  %s: %d brushes\n", style, len(indices))
+		}
+		return
+	}
+
+	if *renderBSP != "" {
+		var sw, sh int
+		if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {
+			fmt.Fprintf(os.Stderr, "error: bad -size %q\n", *shotSize)
+			os.Exit(1)
+		}
+		if err := RenderCLI(*renderBSP, *cams, sw, sh, *gamma); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *extractBP != "" {
 		if _, err := EnsureQuakeTextures(); err != nil {
@@ -113,18 +145,24 @@ func main() {
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
 	} else if *remixMap != "" {
-		// Remix mode: stock map + bolted-on room.
+		// Remix mode: assemble map from brush library.
 		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
 
 		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
-		var err error
-		m, err = RemixPOC(mapSourceDir, *remixMap, rng)
+		lib, err := BuildBrushLibrary(mapSourceDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
 
-		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
+		// Use remix arg as style name, or random if it's a map name.
+		style := StyleFromName(*remixMap)
+		if style == StyleUnknown {
+			style = RandomStyle(rng)
+		}
+
+		m, _ = AssembleMap(rng, lib, style, *arenaSize, *rooms)
+		slug = fmt.Sprintf("assembled_%s_%d", style, s)
 	} else {
 		// Procgen mode.
 		fmt.Printf("seed=%d  arena=%d  depth=%d\n", s, *arenaSize, *rooms)

@@ -61,7 +61,7 @@ func CompileMap(mapPath string, outputDir string) (string, error) {
 
 	// 3. light (optional — may fail without embree on some platforms)
 	if light != "" {
-		if err := run("light", light, bspPath); err != nil {
+		if err := run("light", light, "-surflight_subdivide", "64", bspPath); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: light failed (map will be fullbright): %v\n", err)
 		}
 	}
