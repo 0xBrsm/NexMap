@@ -3,16 +3,20 @@
 import os
 from qgeo import MapWriter, box, prism, wedge, cylinder, arch, stairs
 
-WALL = "wizmet1_2"
-WALL2 = "wizmet1_6"
-FLOOR = "wizmet1_1"
-CEIL = "wizmet1_8"
-TRIM = "wmet1_1"
-BEAM = "wizmet1_4"
-PILLAR = "wizmet1_3"
-PITWALL = "wizmet1_7"
-PITFLOOR = "wizmet1_1"
-RIB = "wmet3_1"
+# Runic metal palette (DM2 family per the id corpus: metal4_4 dominant,
+# met5_1/metal1_*/metal5_* secondary, rune accents, light3_8 panels).
+WALL = "metal4_4"
+WALL2 = "metal2_2"
+FLOOR = "metal1_3"
+CEIL = "metal1_4"
+TRIM = "metal5_1"
+BEAM = "metal1_4"
+PILLAR = "metal5_4"
+PITWALL = "metal1_3"
+PITFLOOR = "metal1_3"
+RIB = "rune2_1"
+LPANEL = "light3_8"
+SCONCE = "light1_4"
 SLIME = "*slime0"
 
 m = MapWriter("The Sludgeworks", minlight=8)
@@ -45,6 +49,11 @@ m.add(box(-384, -256, -160, 384, 256, -96, SLIME))
 m.add(box(-48, -256, -16, 48, 256, 0, TRIM, zp="plat_top1", zn=PITWALL))
 m.add(box(-60, -256, 0, -48, 256, 10, TRIM))
 m.add(box(48, -256, 0, 60, 256, 10, TRIM))
+# rail-mounted runway lamps
+for ly in (-160, 0, 160):
+    m.add(box(-60, ly - 8, 10, -48, ly + 8, 22, LPANEL))
+    m.add(box(48, ly - 8, 10, 60, ly + 8, 22, LPANEL))
+    m.light(0, ly, 40, 175, wait=1.1)
 m.add(cylinder(0, -128, 24, -160, -16, PITWALL, sides=8))
 m.add(cylinder(0, 128, 24, -160, -16, PITWALL, sides=8))
 
@@ -79,13 +88,10 @@ for a, b in spans:
 # ---- ceiling beams with hanging light fixtures ----
 for x in (-272, -16, 240):
     m.add(box(x, -400, 288, x + 32, 400, 320, BEAM))
-for fx, fy in ((-256, -160), (-256, 160), (0, 0), (256, -160), (256, 160)):
-    m.add(box(fx - 12, fy - 12, 272, fx + 12, fy + 12, 288, "light1_1"))
-m.light(-256, -160, 256, 400, wait=0.8)
-m.light(-256, 160, 256, 400, wait=0.8)
-m.light(256, -160, 256, 400, wait=0.8)
-m.light(256, 160, 256, 400, wait=0.8)
-m.light(0, 0, 264, 450, wait=0.8)
+for fx, fy in ((-256, -160), (-256, 160), (0, 0), (0, -160), (0, 160),
+               (256, -160), (256, 160)):
+    m.add(box(fx - 12, fy - 12, 272, fx + 12, fy + 12, 288, LPANEL))
+    m.light(fx, fy, 256, 250, wait=0.9)
 
 # ---- wall ribs above the ledges ----
 for x in (-416, -160, 96, 352):
@@ -101,23 +107,23 @@ m.add(prism([(368, 0), (384, 0), (384, 16)], "x", -512, 512, TRIM))
 m.add(prism([(-384, 0), (-368, 0), (-384, 16)], "x", -512, 512, TRIM))
 
 # ---- sconces: west wall flanking the door ----
-m.add(box(-512, 224, 96, -496, 256, 160, "light1_3"))
-m.add(box(-512, 0, 96, -496, 32, 160, "light1_3"))
-m.light(-480, 240, 128, 300)
-m.light(-480, 16, 128, 300)
+m.add(box(-512, 224, 96, -496, 256, 160, SCONCE))
+m.add(box(-512, 0, 96, -496, 32, 160, SCONCE))
+m.light(-480, 240, 128, 250)
+m.light(-480, 16, 128, 250)
 
 # ---- sconces under the ledges (north/south walls) ----
 for sx in (-240, 144):
-    m.add(box(sx, -384, 64, sx + 32, -368, 128, "light1_3"))
-    m.add(box(sx, 368, 64, sx + 32, 384, 128, "light1_3"))
+    m.add(box(sx, -384, 64, sx + 32, -368, 128, SCONCE))
+    m.add(box(sx, 368, 64, sx + 32, 384, 128, SCONCE))
 m.light(-224, -360, 96, 250)
 m.light(160, -360, 96, 250)
 m.light(-224, 360, 96, 250)
 m.light(160, 360, 96, 250)
 
 # ---- stair lights ----
-m.add(box(496, 96, 224, 512, 128, 256, "light1_3"))
-m.add(box(-512, -144, 224, -496, -112, 256, "light1_3"))
+m.add(box(496, 96, 224, 512, 128, 256, SCONCE))
+m.add(box(-512, -144, 224, -496, -112, 256, SCONCE))
 m.light(480, 112, 240, 280)
 m.light(-480, -128, 240, 280)
 
@@ -151,6 +157,9 @@ m.add(box(-1016, 88, 8, -1008, 168, 152, "*teleport"))
 m.add(box(-1008, 96, 0, -944, 160, 8, TRIM, zp="tele_top"))
 m.light(-976, 128, 160, 300)
 m.light(-800, 32, 160, 150)
+# chamber ceiling fixture
+m.add(box(-916, 116, 184, -892, 140, 192, LPANEL))
+m.light(-904, 128, 176, 250, wait=0.9)
 m.ent("trigger_teleport", brush=box(-1008, 88, 8, -944, 168, 136, "black"),
       target="tele1")
 
@@ -189,10 +198,9 @@ m.ent("ambient_drip", origin="150 180 -40")
 m.ent("ambient_swamp1", origin="250 -100 -60")
 m.ent("ambient_swamp2", origin="-250 100 -60")
 
-m.write(os.path.join(os.path.dirname(__file__), "..", "out", "sludge.map"))
-
-
 # ---- arcade fill lights ----
 for cx in (-256, 0, 256, 448, -448):
-    m.light(cx, 320, 100, 120, wait=1.2)
-    m.light(cx, -320, 100, 120, wait=1.2)
+    m.light(cx, 320, 100, 150, wait=1.2)
+    m.light(cx, -320, 100, 150, wait=1.2)
+
+m.write(os.path.join(os.path.dirname(__file__), "..", "out", "sludge.map"))
