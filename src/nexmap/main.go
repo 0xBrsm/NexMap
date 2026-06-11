@@ -3,226 +3,123 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math/rand/v2"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 func main() {
-	blueprint := flag.String("blueprint", "", "Path to blueprint JSON file")
-	shortBP := flag.String("b", "", "Path to blueprint JSON file (shorthand)")
-	seed := flag.Uint64("seed", 0, "RNG seed (random if 0)")
-	output := flag.String("o", "", "Output path (.map or .bsp)")
-	outputDir := flag.String("output-dir", ".", "Output directory")
-	bspMode := flag.Bool("bsp", false, "Output .bsp directly (no external tools needed)")
-	compileMode := flag.Bool("compile", false, "Output .map then compile with qbsp/vis/light (ericw-tools)")
-	extractBP := flag.String("extract-blueprints", "", "Extract shareware maps to blueprint JSON files in the given directory")
-	renderBSP := flag.String("render", "", "Render PNG screenshots of a .bsp file")
-	cams := flag.String("cams", "", "Cameras as 'x y z yaw pitch[;...]' (default: overview + spawns)")
-	shotSize := flag.String("size", "960x540", "Screenshot size WxH")
-	gamma := flag.Float64("gamma", 1.3, "Screenshot gamma")
+	if len(os.Args) < 2 {
+		usage()
+	}
+	switch os.Args[1] {
+	case "build":
+		buildCmd(os.Args[2:])
+	case "render":
+		renderCmd(os.Args[2:])
+	default:
+		usage()
+	}
+}
 
-	// Procgen options.
-	rooms := flag.Int("rooms", 3, "Max BSP subdivision depth (procgen mode)")
-	arenaSize := flag.Int("arena-size", 3072, "Arena side length in Quake units (procgen mode)")
-	remixMap := flag.String("remix", "", "Source map to remix (e.g. dm4)")
-	buildLib := flag.Bool("build-library", false, "Build brush library from .map sources and print stats")
+func usage() {
+	fmt.Fprintf(os.Stderr, `usage:
+  nexmap build <map-script.py> [-o outdir] [-cams "x y z yaw pitch;..."] [-size WxH] [-gamma G] [-deploy]
+      run map script -> qbsp/vis/light -> render screenshots [-> deploy to Pi]
+  nexmap render <file.bsp> [-cams ...] [-size WxH] [-gamma G]
+      render screenshots of an existing BSP
+`)
+	os.Exit(2)
+}
 
-	flag.Parse()
+func buildCmd(args []string) {
+	fs := flag.NewFlagSet("build", flag.ExitOnError)
+	outDir := fs.String("o", "out", "Output directory")
+	cams := fs.String("cams", "", "Cameras as 'x y z yaw pitch[;...]' (default: overview + spawns)")
+	shotSize := fs.String("size", "960x540", "Screenshot size WxH")
+	gamma := fs.Float64("gamma", 1.3, "Screenshot gamma")
+	deploy := fs.Bool("deploy", false, "Deploy BSP to the Pi after building")
+	deployShare := fs.String("deploy-share", "//10.10.10.10/nqdev", "SMB share for deploy")
+	deployDir := fs.String("deploy-dir", "game/id1/common/maps", "Path within the share")
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		usage()
+	}
+	script := args[0]
+	fs.Parse(args[1:])
 
-	if *buildLib {
-		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
-		lib, err := BuildBrushLibrary(mapSourceDir)
+	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+		fatal(err)
+	}
+
+	// 1. Texture WAD must exist before qbsp resolves worldspawn "wad".
+	if _, err := MaterializeTextureWAD(*outDir); err != nil {
+		fatal(fmt.Errorf("texture WAD: %w", err))
+	}
+
+	// 2. Run the map script.
+	fmt.Printf("== %s\n", script)
+	py := exec.Command("python3", script)
+	py.Stdout = os.Stdout
+	py.Stderr = os.Stderr
+	if err := py.Run(); err != nil {
+		fatal(fmt.Errorf("map script failed: %w", err))
+	}
+
+	base := strings.TrimSuffix(filepath.Base(script), ".py")
+	mapPath := filepath.Join(*outDir, base+".map")
+	if _, err := os.Stat(mapPath); err != nil {
+		fatal(fmt.Errorf("map script did not produce %s", mapPath))
+	}
+
+	// 3. Compile (fails loudly on invalid brushes or leaks).
+	bspPath, err := CompileMap(mapPath, *outDir)
+	if err != nil {
+		fatal(err)
+	}
+
+	// 4. Render screenshots.
+	var sw, sh int
+	if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {
+		fatal(fmt.Errorf("bad -size %q", *shotSize))
+	}
+	if err := RenderCLI(bspPath, *cams, sw, sh, *gamma); err != nil {
+		fatal(fmt.Errorf("render: %w", err))
+	}
+
+	// 5. Deploy.
+	if *deploy {
+		cmd := exec.Command("smbclient", *deployShare, "-N", "-c",
+			fmt.Sprintf("cd %s; put %s", *deployDir, filepath.Base(bspPath)))
+		cmd.Dir = filepath.Dir(bspPath)
+		out, err := cmd.CombinedOutput()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			fatal(fmt.Errorf("deploy failed: %w\n%s", err, out))
 		}
-		// Print style breakdown.
-		for style, indices := range lib.ByStyle {
-			fmt.Printf("  %s: %d brushes\n", style, len(indices))
-		}
-		return
+		fmt.Printf("deployed %s to %s/%s\n", filepath.Base(bspPath), *deployShare, *deployDir)
 	}
+}
 
-	if *renderBSP != "" {
-		var sw, sh int
-		if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {
-			fmt.Fprintf(os.Stderr, "error: bad -size %q\n", *shotSize)
-			os.Exit(1)
-		}
-		if err := RenderCLI(*renderBSP, *cams, sw, sh, *gamma); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		return
+func renderCmd(args []string) {
+	fs := flag.NewFlagSet("render", flag.ExitOnError)
+	cams := fs.String("cams", "", "Cameras as 'x y z yaw pitch[;...]' (default: overview + spawns)")
+	shotSize := fs.String("size", "960x540", "Screenshot size WxH")
+	gamma := fs.Float64("gamma", 1.3, "Screenshot gamma")
+	if len(args) < 1 || strings.HasPrefix(args[0], "-") {
+		usage()
 	}
-
-	if *extractBP != "" {
-		if _, err := EnsureQuakeTextures(); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if err := ExtractSharewareBlueprints(*extractBP); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		return
+	bspPath := args[0]
+	fs.Parse(args[1:])
+	var sw, sh int
+	if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {
+		fatal(fmt.Errorf("bad -size %q", *shotSize))
 	}
-
-	s := *seed
-	if s == 0 {
-		s = rand.Uint64()
+	if err := RenderCLI(bspPath, *cams, sw, sh, *gamma); err != nil {
+		fatal(err)
 	}
-	rng := rand.New(rand.NewPCG(s, 0))
+}
 
-	if err := os.MkdirAll(*outputDir, 0o755); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-
-	bp := *blueprint
-	if bp == "" {
-		bp = *shortBP
-	}
-
-	var m *MapFile
-	var slug string
-
-	if bp != "" {
-		// Blueprint mode.
-		resolved, err := LoadBlueprint(bp)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Printf("blueprint: %s  rooms=%d  connections=%d  theme=%s\n",
-			resolved.Name, len(resolved.Rooms), len(resolved.Connections), resolved.Theme)
-
-		result := CompileBlueprint(resolved, rng)
-
-		m = NewMapFile()
-		m.Worldspawn.Properties["message"] = resolved.Name
-
-		th := GetTheme(resolved.Theme)
-
-		// If style references a source map, override the theme with its palette.
-		if resolved.Style != "" {
-			if lib, err := LoadChunkLibrary(); err == nil {
-				if ep, ok := lib.MapPalettes[resolved.Style]; ok {
-					pal := PaletteFromExtracted(ep)
-					fmt.Printf("style: %s (wall=%s floor=%s ceil=%s)\n", resolved.Style, pal.Wall, pal.Floor, pal.Ceiling)
-					// Override the default textures so all geometry uses this palette.
-					Textures.Floor = pal.Floor
-					Textures.Ceiling = pal.Ceiling
-					Textures.Shell = pal.Trim
-					Textures.Fill = pal.Wall
-				}
-			}
-		}
-		var roomEnvs []string
-		var roomDetails [][]Detail
-		for _, br := range resolved.Rooms {
-			idx, ok := result.IDToIdx[br.ID]
-			if !ok {
-				continue
-			}
-			// Grow slices to fit.
-			for len(roomEnvs) <= idx {
-				roomEnvs = append(roomEnvs, "building")
-			}
-			for len(roomDetails) <= idx {
-				roomDetails = append(roomDetails, nil)
-			}
-			roomEnvs[idx] = br.Environment
-			roomDetails[idx] = br.Details
-		}
-
-		BuildBlueprintGeometryThemed(m, result.Layout, result.Grid, th, roomEnvs, roomDetails)
-		PopulateFromBlueprint(m, result.Layout, resolved, result.IDToIdx, result.TeleConns, rng)
-
-		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
-		slug = strings.ReplaceAll(slug, "'", "")
-	} else if *remixMap != "" {
-		// Remix mode: assemble map from brush library.
-		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
-
-		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
-		lib, err := BuildBrushLibrary(mapSourceDir)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-
-		// Use remix arg as style name, or random if it's a map name.
-		style := StyleFromName(*remixMap)
-		if style == StyleUnknown {
-			style = RandomStyle(rng)
-		}
-
-		m, _ = AssembleMap(rng, lib, style, *arenaSize, *rooms)
-		slug = fmt.Sprintf("assembled_%s_%d", style, s)
-	} else {
-		// Procgen mode.
-		fmt.Printf("seed=%d  arena=%d  depth=%d\n", s, *arenaSize, *rooms)
-		m, _ = RunProcgen(rng, *arenaSize, *rooms)
-		slug = fmt.Sprintf("gen_%d", s)
-	}
-
-	if *bspMode {
-		bspPath := filepath.Join(*outputDir, slug+".bsp")
-		if *output != "" {
-			bspPath = *output
-		}
-
-		if _, err := EnsureQuakeTextures(); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: real textures unavailable: %v\n", err)
-		}
-
-		bspData := BuildBSP(m)
-		f, err := os.Create(bspPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		if err := WriteBSP(f, bspData); err != nil {
-			f.Close()
-			fmt.Fprintf(os.Stderr, "error writing BSP: %v\n", err)
-			os.Exit(1)
-		}
-		f.Close()
-		fmt.Printf("wrote %s  (seed=%d, %d faces, %d nodes, %d leaves)\n",
-			bspPath, s, len(bspData.Faces), len(bspData.Nodes), len(bspData.Leaves))
-	} else {
-		mapPath := filepath.Join(*outputDir, slug+".map")
-		if *output != "" {
-			mapPath = *output
-			if *compileMode && !strings.HasSuffix(mapPath, ".map") {
-				mapPath = strings.TrimSuffix(mapPath, ".bsp") + ".map"
-			}
-		}
-
-		if _, err := MaterializeTextureWAD(*outputDir); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: texture WAD: %v\n", err)
-		}
-
-		f, err := os.Create(mapPath)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
-		}
-		m.Write(f)
-		f.Close()
-		fmt.Printf("wrote %s  (seed=%d)\n", mapPath, s)
-
-		if *compileMode {
-			bspPath, err := CompileMap(mapPath, *outputDir)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: compile: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Printf("compiled %s\n", bspPath)
-		}
-	}
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	os.Exit(1)
 }

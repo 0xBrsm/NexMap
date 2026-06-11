@@ -1,6 +1,7 @@
 package main
 
 import (
+	"sort"
 	"archive/zip"
 	"encoding/binary"
 	"fmt"
@@ -14,20 +15,6 @@ import (
 )
 
 const DefaultTextureWAD = "mapgen_textures.wad"
-
-// TextureSet holds the texture names used by the map generator.
-var Textures = struct {
-	Floor, Ceiling, Shell, Fill string
-	Lava, Water, Slime          string
-}{
-	Floor:   "tech01_1",
-	Ceiling: "tech07_2",
-	Shell:   "tech04_1",
-	Fill:    "metal1_1",
-	Lava:    "*lava1",
-	Water:   "*04water1",
-	Slime:   "*slime",
-}
 
 // quakeTexCache is the lazily-loaded cache of real Quake miptex blobs (name → raw miptex).
 var quakeTexCache map[string][]byte
@@ -362,55 +349,27 @@ func MaterializeTextureWAD(dir string) (string, error) {
 	}
 	path := filepath.Join(dir, DefaultTextureWAD)
 
-	// Try to load real textures (non-fatal if it fails).
 	if _, err := EnsureQuakeTextures(); err != nil {
 		fmt.Fprintf(os.Stderr, "note: real textures unavailable, using synthetic: %v\n", err)
 	}
 
-	// Collect all texture names: base set + all theme pool textures.
-	needed := []string{
-		Textures.Floor, Textures.Ceiling, Textures.Shell, Textures.Fill,
-		Textures.Lava, Textures.Water, Textures.Slime,
-		"*water0", "*slime0", "*teleport", "*lava1",
+	// Include every extracted texture, plus synthetic liquids if missing.
+	names := make([]string, 0, len(quakeTexCache)+4)
+	for name := range quakeTexCache {
+		names = append(names, name)
 	}
-	// Add every texture from both themes.
-	for _, th := range []*Theme{&ThemeTech, &ThemeCastle} {
-		for _, pool := range [][]WeightedTex{
-			th.Building.Walls, th.Building.Floors, th.Building.Ceilings,
-			th.Hallway.Walls, th.Hallway.Floors, th.Hallway.Ceilings,
-			th.Cave.Naturals, th.Outdoor.Floors, th.Outdoor.Naturals,
-		} {
-			for _, wt := range pool {
-				needed = append(needed, wt.Name)
-			}
+	for _, liquid := range []string{"*water0", "*slime0", "*teleport", "*lava1"} {
+		if _, ok := quakeTexCache[liquid]; !ok {
+			names = append(names, liquid)
 		}
 	}
-	// Add every texture from palettes.
-	for _, pals := range [][]TexturePalette{TechPalettes, CastlePalettes} {
-		for _, p := range pals {
-			needed = append(needed, p.Wall, p.Floor, p.Ceiling, p.Trim)
-		}
-	}
-	// Add textures from extracted chunk library palettes.
-	if lib, err := LoadChunkLibrary(); err == nil {
-		for _, ep := range lib.MapPalettes {
-			for t := range ep.Walls { needed = append(needed, t) }
-			for t := range ep.Floors { needed = append(needed, t) }
-			for t := range ep.Ceilings { needed = append(needed, t) }
-		}
-	}
+	sort.Strings(names)
 
 	var entries []struct {
 		name string
 		blob []byte
 	}
-	seen := map[string]bool{}
-
-	for _, name := range needed {
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
+	for _, name := range names {
 		entries = append(entries, struct {
 			name string
 			blob []byte

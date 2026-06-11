@@ -150,6 +150,29 @@ func LoadQuakePalette() ([256][3]uint8, error) {
 	return pal, fmt.Errorf("gfx/palette.lmp not found in pak0")
 }
 
+// parseEntities parses the BSP entity lump into key/value maps.
+func parseEntities(s string) []map[string]string {
+	var result []map[string]string
+	var current map[string]string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "{" {
+			current = map[string]string{}
+		} else if line == "}" {
+			if current != nil {
+				result = append(result, current)
+				current = nil
+			}
+		} else if current != nil {
+			parts := strings.SplitN(line, "\" \"", 2)
+			if len(parts) == 2 {
+				current[strings.Trim(parts[0], "\" ")] = strings.Trim(parts[1], "\" ")
+			}
+		}
+	}
+	return result
+}
+
 type Vec3 struct{ X, Y, Z float64 }
 
 func (a Vec3) Sub(b Vec3) Vec3   { return Vec3{a.X - b.X, a.Y - b.Y, a.Z - b.Z} }
