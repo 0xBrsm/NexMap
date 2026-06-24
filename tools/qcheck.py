@@ -19,7 +19,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(_HERE, "..", "maps"))
 
 from qcorpus import parse_map, outward_normal, family  # noqa: E402
-from qtheme import METRICS, THEME_FAMILIES  # noqa: E402
+from qtheme import METRICS, THEME_FAMILIES, FLOW_BANDS  # noqa: E402
 
 EPS = 0.1
 
@@ -362,6 +362,130 @@ class Checker:
             self.warn("light_stats",
                       f"_minlight {minlight:.0f} flattens shadows (keep <= 30)")
 
+    # ---------------------------------------------------------- flow
+
+    def _nav_nodes(self):
+        return [t for t in self.tops
+                if t[2] - t[0] >= 16 and t[3] - t[1] >= 16]
+
+    def _seg_clear(self, x0, y0, x1, y1, z):
+        """True if the horizontal segment at height z misses every solid brush
+        (AABB slab clip at eye height) — a cheap sightline test."""
+        dx, dy = x1 - x0, y1 - y0
+        for br in self.solids:
+            a = br.aabb
+            if a is None or a[2] > z or a[5] < z:
+                continue
+            tmin, tmax = 0.0, 1.0
+            hit = True
+            for p, d, lo, hi in ((x0, dx, a[0], a[3]), (y0, dy, a[1], a[4])):
+                if abs(d) < 1e-9:
+                    if p < lo or p > hi:
+                        hit = False
+                        break
+                else:
+                    t0, t1 = (lo - p) / d, (hi - p) / d
+                    if t0 > t1:
+                        t0, t1 = t1, t0
+                    tmin, tmax = max(tmin, t0), min(tmax, t1)
+                    if tmin > tmax:
+                        hit = False
+                        break
+            if hit and tmin <= tmax:
+                return False
+        return True
+
+    def flow_metrics(self, sightlines=False):
+        """Topology of the walkable nav graph: loops, dead ends, elevation,
+        sightlines. The same node/adjacency model the reachability check uses."""
+        nodes = self._nav_nodes()
+        n = len(nodes)
+        out = {"nodes": n}
+        if n == 0:
+            return out
+        adj = [set() for _ in range(n)]
+        edges = 0
+        for i in range(n):
+            ai = nodes[i]
+            for j in range(i + 1, n):
+                bj = nodes[j]
+                if abs(bj[4] - ai[4]) <= METRICS["max_climb"] and \
+                        rects_overlap(ai, bj, grow=18.0):
+                    adj[i].add(j)
+                    adj[j].add(i)
+                    edges += 1
+        seen = [False] * n
+        comps = []
+        for s in range(n):
+            if seen[s]:
+                continue
+            stack, comp = [s], []
+            seen[s] = True
+            while stack:
+                u = stack.pop()
+                comp.append(u)
+                for v in adj[u]:
+                    if not seen[v]:
+                        seen[v] = True
+                        stack.append(v)
+            comps.append(comp)
+        comps.sort(key=len, reverse=True)
+        main = comps[0]
+        out.update({
+            "edges": edges,
+            "components": len(comps),
+            "loops": edges - n + len(comps),
+            "loop_density": round((edges - n + len(comps)) / n, 3),
+            "dead_end_ratio": round(sum(1 for i in main if len(adj[i]) <= 1)
+                                    / len(main), 3),
+            "coverage": round(len(main) / n, 3),
+        })
+        levels = sorted({round(nodes[i][4] / 16) * 16 for i in main})
+        out["elevation_levels"] = len(levels)
+        out["elevation_span"] = (max(levels) - min(levels)) if levels else 0
+        if sightlines and len(main) > 2:
+            cen = [((nodes[i][0] + nodes[i][2]) / 2,
+                    (nodes[i][1] + nodes[i][3]) / 2, nodes[i][4] + 40)
+                   for i in main]
+            step = max(1, len(cen) // 60)
+            dists = []
+            for a in range(0, len(cen), step):
+                best = 0.0
+                for b in range(0, len(cen), step):
+                    if a != b and self._seg_clear(cen[a][0], cen[a][1],
+                                                  cen[b][0], cen[b][1], cen[a][2]):
+                        best = max(best, math.hypot(cen[b][0] - cen[a][0],
+                                                    cen[b][1] - cen[a][1]))
+                dists.append(best)
+            if dists:
+                dists.sort()
+                out["sightline_p50"] = int(statistics.median(dists))
+                out["sightline_p90"] = int(dists[min(len(dists) - 1,
+                                                     int(len(dists) * 0.9))])
+        return out
+
+    def check_flow(self):
+        """Warn when movement topology falls outside the id corpus bands
+        (FLOW_BANDS). Dead-end-heavy or tree-like layouts are the unplayable
+        tell; flat maps get a soft note."""
+        fm = self.flow_metrics()
+        if fm.get("nodes", 0) < 6:
+            return
+        ld = fm["loop_density"]
+        de = fm["dead_end_ratio"]
+        if ld < FLOW_BANDS["loop_density"]["warn_below"]:
+            self.warn("flow", f"tree-like layout: loop density {ld:.2f} "
+                      f"(id median {FLOW_BANDS['loop_density']['median']}; "
+                      f"few circuits to run — add routes that close loops)")
+        if de > FLOW_BANDS["dead_end_ratio"]["warn_above"]:
+            self.warn("flow", f"dead-end-heavy: {de*100:.0f}% of the main path "
+                      f"is dead ends (id <= 19%; rooms need >=2 exits)")
+        if fm.get("elevation_levels", 0) < FLOW_BANDS["elevation_levels"]["warn_below"] \
+                and fm.get("elevation_span", 0) < 64:
+            self.warn("flow", f"flat: {fm.get('elevation_levels')} floor levels "
+                      f"(id median {FLOW_BANDS['elevation_levels']['median']}; "
+                      f"vary heights for interest)")
+
     def check_theme(self):
         counts = {}
         total = 0
@@ -422,6 +546,7 @@ class Checker:
         self.check_reachability()
         self.check_lights()
         self.check_theme()
+        self.check_flow()
         return {"failures": self.failures, "warnings": self.warnings,
                 "cams": self.suggest_cams()}
 

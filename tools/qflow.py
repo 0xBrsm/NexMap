@@ -22,129 +22,22 @@ Usage:
   python3 tools/qflow.py corpus [--source id]      # bands across the corpus
 """
 import json
-import math
 import os
-import statistics
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(_HERE, "..", "maps"))
 
-from qcheck import Checker, rects_overlap          # noqa: E402
-from qtheme import METRICS as M                     # noqa: E402
-
-CLIMB = M["max_climb"]
-
-
-def _nodes(chk):
-    return [t for t in chk.tops if t[2] - t[0] >= 16 and t[3] - t[1] >= 16]
-
-
-def _ray_clear(chk, x0, y0, x1, y1, z):
-    """True if the horizontal segment at height z doesn't pass through a solid
-    brush (cheap AABB-slab test at the eye height z)."""
-    for br in chk.solids:
-        a = br.aabb
-        if a is None or a[2] > z or a[5] < z:
-            continue
-        # segment vs axis box in 2D (slab clip)
-        tmin, tmax = 0.0, 1.0
-        dx, dy = x1 - x0, y1 - y0
-        for p, d, lo, hi in ((x0, dx, a[0], a[3]), (y0, dy, a[1], a[4])):
-            if abs(d) < 1e-9:
-                if p < lo or p > hi:
-                    break
-            else:
-                t0, t1 = (lo - p) / d, (hi - p) / d
-                if t0 > t1:
-                    t0, t1 = t1, t0
-                tmin, tmax = max(tmin, t0), min(tmax, t1)
-                if tmin > tmax:
-                    break
-        else:
-            if tmin <= tmax:
-                return False
-    return True
+from qcheck import Checker                          # noqa: E402
 
 
 def analyze(path, sightlines=True):
-    chk = Checker(path)
-    nodes = _nodes(chk)
-    n = len(nodes)
-    out = {"map": os.path.basename(path), "nodes": n}
-    if n == 0:
-        return out
-
-    # undirected edges: overlapping footprints within a single step in height
-    adj = [set() for _ in range(n)]
-    edges = 0
-    for i in range(n):
-        ai = nodes[i]
-        for j in range(i + 1, n):
-            bj = nodes[j]
-            if abs(bj[4] - ai[4]) <= CLIMB and rects_overlap(ai, bj, grow=18.0):
-                adj[i].add(j)
-                adj[j].add(i)
-                edges += 1
-
-    # connected components + largest
-    seen = [False] * n
-    comps = []
-    for s in range(n):
-        if seen[s]:
-            continue
-        stack, comp = [s], []
-        seen[s] = True
-        while stack:
-            u = stack.pop()
-            comp.append(u)
-            for v in adj[u]:
-                if not seen[v]:
-                    seen[v] = True
-                    stack.append(v)
-        comps.append(comp)
-    comps.sort(key=len, reverse=True)
-    main = comps[0]
-    c = len(comps)
-    loops = edges - n + c
-    main_set = set(main)
-    dead = sum(1 for i in main if len(adj[i]) <= 1)
-
-    out.update({
-        "edges": edges,
-        "components": c,
-        "loops": loops,
-        "loop_density": round(loops / n, 3),
-        "dead_end_ratio": round(dead / len(main), 3),
-        "coverage": round(len(main) / n, 3),
-    })
-
-    levels = sorted({round(nodes[i][4] / 16) * 16 for i in main})
-    out["elevation_levels"] = len(levels)
-    out["elevation_span"] = (max(levels) - min(levels)) if levels else 0
-
-    if sightlines and len(main) > 2:
-        cen = [( (nodes[i][0] + nodes[i][2]) / 2,
-                 (nodes[i][1] + nodes[i][3]) / 2, nodes[i][4] + 40)
-               for i in main]
-        dists = []
-        step = max(1, len(cen) // 60)          # cap the sample for speed
-        for a in range(0, len(cen), step):
-            best = 0.0
-            for b in range(0, len(cen), step):
-                if a == b:
-                    continue
-                if _ray_clear(chk, cen[a][0], cen[a][1], cen[b][0], cen[b][1],
-                              cen[a][2]):
-                    best = max(best, math.hypot(cen[b][0] - cen[a][0],
-                                                cen[b][1] - cen[a][1]))
-            dists.append(best)
-        if dists:
-            dists.sort()
-            out["sightline_p50"] = int(statistics.median(dists))
-            out["sightline_p90"] = int(dists[min(len(dists) - 1,
-                                                  int(len(dists) * 0.9))])
+    """Flow metrics for one map. The graph + metric code lives on
+    qcheck.Checker so qcheck's build-time flow gate and this reporter never
+    diverge."""
+    out = {"map": os.path.basename(path)}
+    out.update(Checker(path).flow_metrics(sightlines=sightlines))
     return out
 
 
