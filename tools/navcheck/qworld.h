@@ -1,13 +1,13 @@
 // qworld — minimal standalone Quake world collision for navcheck.
 //
 // Loads a BSP29 file's clip hulls (hull 0 from nodes via Mod_MakeHull0, hulls
-// 1/2 from the clipnodes lump) and provides SV_Move / SV_PointContents so the
-// ported nav_hull (hull-1 polygonization) and link callback can run offline,
-// matching what FrikBot's bots collide against in-engine.
+// 1/2 from the clipnodes lump) for every submodel, and provides SV_Move /
+// SV_PointContents so the ported nav_hull (hull-1 polygonization) and the
+// entity-link collectors can run offline, matching what FrikBot's bots
+// collide against in-engine.
 //
-// Collision routines (SV_HullPointContents / SV_RecursiveHullCheck /
-// SV_HullForEntity) are adapted from the GPL Quake source (WinQuake
-// world.c / model.c, id Software).
+// Collision routines (SV_HullPointContents / SV_RecursiveHullCheck) are
+// adapted from the GPL Quake source (WinQuake world.c / model.c, id Software).
 
 #ifndef QWORLD_H
 #define QWORLD_H
@@ -30,8 +30,6 @@ typedef float vec3_t[3];
 #define CONTENTS_CURRENT_0    -9
 #define CONTENTS_CURRENT_DOWN -14
 
-// SV_Move type (only world clipping is implemented; type is accepted for
-// signature compatibility with the FrikBot link code).
 #define MOVE_NORMAL    0
 #define MOVE_NOMONSTERS 1
 #define MOVE_MISSILE   2
@@ -58,36 +56,27 @@ typedef struct hull_s {
 } hull_t;
 
 typedef struct model_s {
-	vec3_t mins, maxs;
+	vec3_t mins, maxs, origin;
 	hull_t hulls[MAX_MAP_HULLS];
-	// owned arrays (freed by qworld_free)
-	mplane_t    *planes;
-	dclipnode_t *clipnodes;   // hulls 1/2
-	dclipnode_t *hull0nodes;  // hull 0 (built from nodes)
-	char        *entities;    // entity lump string
-	int          num_models;
-	vec3_t      *model_mins;  // per-submodel bbox (for brush-entity volumes)
-	vec3_t      *model_maxs;
 } model_t;
 
-typedef struct edict_s edict_t; // opaque; navcheck always passes NULL
+typedef struct edict_s edict_t; // opaque to qworld; defined in qents.h
 
 typedef struct trace_s {
-	int   allsolid;    // if true, plane is not valid
-	int   startsolid;  // if true, the initial point was in a solid area
+	int   allsolid;
+	int   startsolid;
 	int   inopen, inwater;
-	float fraction;    // 1.0 = didn't hit anything
+	float fraction;
 	vec3_t endpos;
 	struct { vec3_t normal; float dist; } plane;
 	edict_t *ent;
 } trace_t;
 
-// cvar-like shims so the ported link code can read sv_gravity.value etc.
+// cvar-like shims so ported code can read sv_gravity.value etc.
 typedef struct { float value; } qcvar_t;
 extern qcvar_t sv_gravity;
 extern qcvar_t sv_maxspeed;
 
-// --- vector helpers (match WinQuake names used by the ported code) ---
 #define DotProduct(a,b) ((a)[0]*(b)[0]+(a)[1]*(b)[1]+(a)[2]*(b)[2])
 #define VectorCopy(a,b) {(b)[0]=(a)[0];(b)[1]=(a)[1];(b)[2]=(a)[2];}
 #define VectorSubtract(a,b,c) {(c)[0]=(a)[0]-(b)[0];(c)[1]=(a)[1]-(b)[1];(c)[2]=(a)[2]-(b)[2];}
@@ -95,11 +84,13 @@ extern qcvar_t sv_maxspeed;
 extern vec3_t vec3_origin;
 
 // --- API ---
-model_t *qworld_load(const char *bsp_path, char *err, int errsz);
-void     qworld_free(model_t *m);
+model_t *qworld_load(const char *bsp_path, char *err, int errsz); // returns world (submodel 0)
+void     qworld_free(model_t *world);
+int      qworld_num_models(void);
+model_t *qworld_model(int i);              // submodel i (i==0 is world)
+const char *qworld_entities(void);         // entity lump string
 
-// Active world model used by SV_Move / SV_PointContents.
-void     qworld_set_active(model_t *m);
+void     qworld_set_active(model_t *m);    // world model for SV_Move/SV_PointContents
 
 int      SV_HullPointContents(hull_t *hull, int num, const vec3_t p);
 int      SV_PointContents(const vec3_t p);

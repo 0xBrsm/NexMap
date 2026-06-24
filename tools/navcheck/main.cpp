@@ -22,7 +22,9 @@
 #include "nav_mesh.h"
 #include "nav_hull.h"
 #include "nav_links.h"
+#include "nav_ents.h"
 #include "qworld.h"
+#include "qents.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -201,9 +203,9 @@ static bool is_nav_relevant(const std::string &c)
 	       c.rfind("item_",0)==0 || c.rfind("ammo_",0)==0;
 }
 
-// Load hull-1 geometry + query points + teleporter links from a BSP.
+// Load hull geometry + query points + entity off-mesh links from a BSP.
 // Returns the loaded world (kept active for the link callback's tracer);
-// caller frees it after nav_mesh_build. NULL on failure.
+// caller frees it (qworld_free + qents_free) after nav_mesh_build. NULL on fail.
 static model_t *load_bsp_scene(const char *path, std::vector<float> &verts,
 	std::vector<int> &tris, std::vector<QueryPoint> &points,
 	std::vector<nav_off_mesh_link_t> &links, char *err, size_t errsz)
@@ -211,59 +213,42 @@ static model_t *load_bsp_scene(const char *path, std::vector<float> &verts,
 	model_t *world = qworld_load(path, err, (int)errsz);
 	if (!world) return nullptr;
 	qworld_set_active(world);
+	qents_load(); // edict/sv shim over the entity lump
 
-	// Geometry: hull-1 polygonization (walkableRadius=0, no erosion).
+	// Geometry: world clip hull 1 + static brush-entity hulls (thin door
+	// floors, walls, gates, trains) — walkableRadius 0, no erosion.
 	float *hv = nullptr; int hvc = 0; int *ht = nullptr; int htc = 0;
-	nav_hull_begin();
-	nav_hull_add_model(world, nullptr);
-	nav_hull_end(&hv, &hvc, &ht, &htc);
+	navcheck_extract_bsp(world, &hv, &hvc, &ht, &htc);
 	verts.assign(hv, hv + (size_t)hvc * 3);
 	tris.assign(ht, ht + (size_t)htc * 3);
 	free(hv); free(ht);
 
-	// Entities: query points (spawns/pickups) + teleporter off-mesh links.
-	auto ents = parse_entities(world->entities);
-	std::unordered_map<std::string,std::array<float,3>> dests;
-	struct Trig { std::string target; int model; };
-	std::vector<Trig> trigs;
+	// Entity off-mesh links: teleporters, platforms, trains.
+	nav_off_mesh_link_t *el = nullptr;
+	int n;
+	n = navcheck_collect_teleporters(&el);
+	for (int i = 0; i < n; i++) links.push_back(el[i]);
+	free(el); el = nullptr;
+	n = navcheck_collect_platform_links(&el);
+	for (int i = 0; i < n; i++) links.push_back(el[i]);
+	free(el); el = nullptr;
+	n = navcheck_collect_train_links(&el);
+	for (int i = 0; i < n; i++) links.push_back(el[i]);
+	free(el); el = nullptr;
+
+	// Query points: spawns + pickups from the entity lump.
+	auto ents = parse_entities(qworld_entities());
 	std::unordered_map<std::string,int> counts;
 	for (auto &kv : ents) {
 		auto ci = kv.find("classname");
-		if (ci == kv.end()) continue;
-		const std::string &cls = ci->second;
-		if (cls == "info_teleport_destination") {
-			auto oi = kv.find("origin");
-			if (oi == kv.end()) continue;
-			float x,y,z; if (sscanf(oi->second.c_str(), "%f %f %f", &x,&y,&z)!=3) continue;
-			auto ti = kv.find("targetname");
-			if (ti != kv.end()) dests[ti->second] = {x,y,z};
-		} else if (cls == "trigger_teleport") {
-			auto mi = kv.find("model");
-			if (mi == kv.end() || mi->second.empty() || mi->second[0] != '*') continue;
-			int n = atoi(mi->second.c_str()+1);
-			auto ti = kv.find("target");
-			trigs.push_back({ ti!=kv.end()?ti->second:"", n });
-		} else if (is_nav_relevant(cls)) {
-			auto oi = kv.find("origin");
-			if (oi == kv.end()) continue;
-			QueryPoint qp;
-			if (sscanf(oi->second.c_str(), "%f %f %f", &qp.pos[0],&qp.pos[1],&qp.pos[2])!=3) continue;
-			std::string label = cls.rfind("info_player",0)==0 ? "spawn" : cls;
-			qp.label = label + "#" + std::to_string(++counts[label]);
-			points.push_back(qp);
-		}
-	}
-	for (auto &t : trigs) {
-		auto di = dests.find(t.target);
-		if (di == dests.end()) continue;
-		if (t.model < 0 || t.model >= world->num_models) continue;
-		nav_off_mesh_link_t l; memset(&l, 0, sizeof(l));
-		l.start[0] = (world->model_mins[t.model][0]+world->model_maxs[t.model][0])*0.5f;
-		l.start[1] = (world->model_mins[t.model][1]+world->model_maxs[t.model][1])*0.5f;
-		l.start[2] = world->model_mins[t.model][2];
-		l.end[0]=di->second[0]; l.end[1]=di->second[1]; l.end[2]=di->second[2];
-		l.radius = 128.0f; l.bidirectional = 0; l.link_type = AI_TELELINK;
-		links.push_back(l);
+		if (ci == kv.end() || !is_nav_relevant(ci->second)) continue;
+		auto oi = kv.find("origin");
+		if (oi == kv.end()) continue;
+		QueryPoint qp;
+		if (sscanf(oi->second.c_str(), "%f %f %f", &qp.pos[0],&qp.pos[1],&qp.pos[2])!=3) continue;
+		std::string label = ci->second.rfind("info_player",0)==0 ? "spawn" : ci->second;
+		qp.label = label + "#" + std::to_string(++counts[label]);
+		points.push_back(qp);
 	}
 	return world; // kept alive for the link callback; caller frees
 }
@@ -337,7 +322,7 @@ int main(int argc, char **argv)
 			if (n > 0) { append_links(extra, n); nav_mesh_destroy(nav); nav = build(); }
 			free(extra);
 		}
-		qworld_free(world); qworld_set_active(nullptr); world = nullptr;
+		qents_free(); qworld_free(world); qworld_set_active(nullptr); world = nullptr;
 	}
 
 	if (!nav) {
