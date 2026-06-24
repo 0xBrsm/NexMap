@@ -73,6 +73,14 @@ def prism(points, axis, lo, hi, tex, cap_lo=None, cap_hi=None):
     ai = AXES[axis]
     o1, o2 = [i for i in range(3) if i != ai]  # the in-plane axes
 
+    # Force CCW winding: prism's outward-normal math assumes it. A CW polygon
+    # would emit inward normals -> qbsp "couldn't create brush faces".
+    area2 = sum(points[i][0] * points[(i + 1) % len(points)][1]
+                - points[(i + 1) % len(points)][0] * points[i][1]
+                for i in range(len(points)))
+    if area2 < 0:
+        points = list(reversed(points))
+
     def to3(p2, a):
         v = [0.0, 0.0, 0.0]
         v[ai] = a
@@ -218,6 +226,15 @@ class MapWriter:
 
     def light(self, x, y, z, value, **keys):
         self.ent("light", origin=f"{x} {y} {z}", light=value, **keys)
+
+    def place(self, prefab):
+        """Drop a Prefab (qprefab.Prefab) into the map: its world brushes go
+        to worldspawn, its entities (lights, items, fixtures, brush ents) are
+        emitted. Returns the prefab so callers can read back placed origins."""
+        self.brushes.extend(prefab.brushes)
+        for classname, keys, brush in prefab.ents:
+            self.ent(classname, brush=brush, **keys)
+        return prefab
 
     def write(self, path):
         ws = ["{"] + [f'"{k}" "{v}"' for k, v in self.props.items()]
