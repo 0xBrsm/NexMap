@@ -5,8 +5,7 @@ description: Author Quake 1 maps in the style of the id originals. Use when writ
 
 # Quake Mapping
 
-Author maps as Python scripts (`maps/<name>.py`) using `maps/qgeo.py` primitives.
-Build and iterate with:
+Author maps as Python scripts (`maps/<name>.py`). Build and iterate with:
 
     ./src/nexmap/nexmap build maps/<name>.py [-cams "x y z yaw pitch;..."] [-deploy]
 
@@ -14,11 +13,54 @@ The pipeline fails loudly on invalid brushes, leaks, unsealed maps, and zero
 lightdata. Never pass `-bounce` to light (vendored build silently produces a
 fullbright map).
 
-## The loop
+## The authoring stack (use it — don't freehand brushes)
 
-1. Write/edit the map script. 2. Build. 3. **Read the rendered PNGs and
-critique them** — composition, texture coherence, light pools, silhouettes.
-4. Iterate. Never ship a map you haven't looked at from multiple cameras.
+Hand-placed raw coordinates are the source of the boxy/floating/dead-zone
+failures. The stack exists so each failure mode is fixed once, in code:
+
+- `maps/qtheme.py` — `METRICS` (hull, steps, doorways, lighting bands) and
+  `THEMES` palettes. Single source of truth for dimensions and textures.
+- `maps/qlayout.py` — the layout IR. Describe `Room`s and `connect()` them
+  (door/corridor/arch/stairs/drop/teleport). Rooms seal themselves, portals
+  punch automatically, and a **build-time navcheck** makes an unconnected
+  room a hard error. `Room.item()` seats items on pedestals so they never
+  float. `shell=False` is the escape hatch for hand-built geometry.
+- `maps/qprefab.py` — parametric prefabs (landed stairs, archways, pillars,
+  curved/chamfered walls, item pedestals, light fixtures, catwalks, vaults,
+  teleporter pads). Catalog in [prefabs.md](prefabs.md).
+- `maps/qgeo.py` — low-level brush primitives. Reach for these only when a
+  prefab/room doesn't cover the shape.
+- `tools/qcheck.py` — deterministic validator wired into `nexmap build`. It
+  runs before qbsp and **hard-fails the build** on floating/embedded/colliding
+  entities; it warns on missing landings, unreachable items, thin wall margins,
+  low headroom, sparse/flat lighting, and off-palette textures.
+
+## The mandatory loop
+
+1. **Spec** — name the theme (one only), the rooms, the connection graph, the
+   item/spawn plan. A few lines of intent before any geometry.
+2. **Layout** — build it with `qlayout.Room` + `connect()`. Let the navcheck
+   and self-sealing do their job; drop to `qprefab`/`qgeo` for detail.
+3. **Build** — `nexmap build`. The qcheck gate must pass (fix every FAIL).
+4. **Render-critique** — Read the PNGs from every camera and grade against the
+   rubric below. Iterate until it passes. Never deploy a map you haven't
+   looked at, and never ship while any rubric point is failing.
+
+## Ship rubric (all six must pass before deploy)
+
+1. **Mood lighting** — light *pools and falls off*; visible sources motivate
+   every bright patch; no flat wash, no `_minlight` > 30. Dark families
+   (wizard/metal) need ~2x the light count/value of brown base.
+2. **Curves** — at least one arch, vault, chamfer, or swept wall. No room is a
+   bare box; no run of unbroken 90-degree corners.
+3. **Scale** — rooms read generous, not cramped; headroom > a jump; sightlines
+   that span more than one room.
+4. **Stair landings** — every flight has a bottom landing; runs over 96 of
+   rise are broken by a mid-landing (use `qprefab.stairs_landed`).
+5. **Seated items/spawns** — nothing floats or embeds; pickups sit on the
+   floor or a pedestal; qcheck item/spacing checks pass clean.
+6. **Mystery/atmosphere** — at least one concealed, teased, or vertically
+   revealed space; not every area visible from spawn.
 
 ## Core invariants (from the id corpus)
 

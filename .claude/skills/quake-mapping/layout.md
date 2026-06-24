@@ -42,3 +42,33 @@ Brush thickness (min dimension) — the structural vocabulary:
 - Not yet measured (query the corpus if needed): room footprints, corridor
   widths, ceiling-height distributions. A future qcorpus query could derive
   these from floor/ceiling face gaps.
+
+## These numbers live in code: `maps/qtheme.py` `METRICS`
+
+Don't retype the constants above into a map — import them. `METRICS` carries
+player hull, `step_h`/`step_run`, `max_stair_rise`/`landing_depth`,
+`door_w`/`door_h`, `corridor_w`/`corridor_headroom`, `item_z`/`item_gap_max`,
+`entity_spacing`, `wall_margin`, `wall_thickness`, and the lighting bands.
+`tools/qcheck.py` enforces them, so keeping authoring and validation on the
+same source prevents drift.
+
+## Building layouts with `qlayout`
+
+```python
+from qlayout import Layout
+L = Layout("My Arena", "metal", worldtype=1, minlight=6)
+hub  = L.room("hub", -384,-384,384,384, 0,320, chamfer=48)
+vault = L.room("vault", 512,-256,1024,256, 0,256)
+L.connect("corridor", hub, vault)          # fills + seals the gap, lights it
+L.connect("arch", hub, side, width=128)    # curved opening (adjacent rooms)
+L.connect("teleport", vault, hub, a_at=(768,0), b_at=(0,0))
+hub.item("item_artifact_invulnerability", 0, 0)   # seated on a pedestal
+hub.spawn(-300, -300, angle=45, dm=False)
+L.write("out/myarena.map")                  # navcheck runs here; raises if a
+                                            # room is unreachable
+```
+
+Rules: `door`/`arch` are for **adjacent** rooms (walls ~touching); `corridor`
+for **separated** rooms (it builds the connecting tube). Connections punch both
+walls automatically. Every room needs a connection path from the spawn room or
+the build raises before it ever reaches qbsp.

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -72,13 +73,29 @@ func buildCmd(args []string) {
 		fatal(fmt.Errorf("map script did not produce %s", mapPath))
 	}
 
-	// 3. Compile (fails loudly on invalid brushes or leaks).
+	// 3. Validate with qcheck (deterministic gate) before compiling. Hard
+	// failures (floating/colliding entities) abort the build; warnings print.
+	checkPath := filepath.Join(*outDir, base+".check.json")
+	qcheck := filepath.Join(filepath.Dir(filepath.Dir(script)), "tools", "qcheck.py")
+	qc := exec.Command("python3", qcheck, mapPath, "--json", checkPath)
+	qc.Stdout = os.Stdout
+	qc.Stderr = os.Stderr
+	if err := qc.Run(); err != nil {
+		fatal(fmt.Errorf("qcheck gate failed — fix the FAIL lines above: %w", err))
+	}
+
+	// When no cameras were given, render the views qcheck suggested.
+	if *cams == "" {
+		*cams = readCheckCams(checkPath)
+	}
+
+	// 4. Compile (fails loudly on invalid brushes or leaks).
 	bspPath, err := CompileMap(mapPath, *outDir)
 	if err != nil {
 		fatal(err)
 	}
 
-	// 4. Render screenshots.
+	// 5. Render screenshots.
 	var sw, sh int
 	if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {
 		fatal(fmt.Errorf("bad -size %q", *shotSize))
@@ -87,7 +104,7 @@ func buildCmd(args []string) {
 		fatal(fmt.Errorf("render: %w", err))
 	}
 
-	// 5. Deploy.
+	// 6. Deploy.
 	if *deploy {
 		cmd := exec.Command("smbclient", *deployShare, "-N", "-c",
 			fmt.Sprintf("cd %s; put %s", *deployDir, filepath.Base(bspPath)))
@@ -117,6 +134,22 @@ func renderCmd(args []string) {
 	if err := RenderCLI(bspPath, *cams, sw, sh, *gamma); err != nil {
 		fatal(err)
 	}
+}
+
+// readCheckCams returns the suggested camera string qcheck wrote to its
+// check.json, or "" if absent/unreadable (caller falls back to defaults).
+func readCheckCams(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var v struct {
+		Cams string `json:"cams"`
+	}
+	if json.Unmarshal(b, &v) != nil {
+		return ""
+	}
+	return v.Cams
 }
 
 func fatal(err error) {
