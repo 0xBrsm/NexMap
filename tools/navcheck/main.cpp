@@ -20,6 +20,9 @@
 // Output: JSON report on stdout.
 
 #include "nav_mesh.h"
+#include "nav_hull.h"
+#include "nav_links.h"
+#include "qworld.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -29,19 +32,22 @@
 #include <string>
 #include <unordered_map>
 #include <queue>
+#include <array>
 
-// Quake-tuned Recast params (from FrikBotNex nav_bot.cpp — agent radius 16,
-// height 56, step 18; cell_size = radius/4 for indoor detail).
+// Hull-mode Recast params (from FrikBotNex nav_bot.cpp). Geometry comes from
+// clip hull 1, which qbsp pre-expanded by the player box — so the agent is a
+// POINT: walkable_radius 0 (no erosion) and walkable_height is the leftover
+// hull gap (real gap minus 56), not the player height.
 static void default_config(nav_mesh_build_config_t *c)
 {
 	c->cell_size = 4.0f;
 	c->cell_height = 2.0f;
 	c->walkable_slope_angle = 45.0f;
-	c->walkable_height = 56.0f;
+	c->walkable_height = 8.0f;
 	c->walkable_climb = 18.0f;
-	c->walkable_radius = 16.0f;
+	c->walkable_radius = 0.0f;
 	c->max_edge_len = 192.0f;
-	c->max_simplification_error = 1.3f;
+	c->max_simplification_error = 0.1f;
 	c->min_region_size = 2;
 	c->merge_region_size = 20;
 	c->max_verts_per_poly = 6;
@@ -161,34 +167,179 @@ static float poly_area(const nav_mesh_poly_record_t &r)
 	return dx * dy; // approximate (bounding footprint)
 }
 
+// --- BSP mode: load geometry from the clip hull + entities directly ---
+
+// Minimal entity-lump parsing (key "value" pairs inside { } blocks).
+static std::vector<std::unordered_map<std::string,std::string>> parse_entities(const char *s)
+{
+	std::vector<std::unordered_map<std::string,std::string>> out;
+	const char *p = s;
+	while (*p) {
+		if (*p != '{') { p++; continue; }
+		p++;
+		std::unordered_map<std::string,std::string> kv;
+		while (*p && *p != '}') {
+			while (*p && *p != '"' && *p != '}') p++;
+			if (*p != '"') break;
+			p++; std::string key; while (*p && *p != '"') key += *p++;
+			if (*p == '"') p++;
+			while (*p && *p != '"' && *p != '}') p++;
+			if (*p != '"') break;
+			p++; std::string val; while (*p && *p != '"') val += *p++;
+			if (*p == '"') p++;
+			kv[key] = val;
+		}
+		if (*p == '}') p++;
+		out.push_back(std::move(kv));
+	}
+	return out;
+}
+
+static bool is_nav_relevant(const std::string &c)
+{
+	return c.rfind("info_player",0)==0 || c.rfind("weapon_",0)==0 ||
+	       c.rfind("item_",0)==0 || c.rfind("ammo_",0)==0;
+}
+
+// Load hull-1 geometry + query points + teleporter links from a BSP.
+// Returns the loaded world (kept active for the link callback's tracer);
+// caller frees it after nav_mesh_build. NULL on failure.
+static model_t *load_bsp_scene(const char *path, std::vector<float> &verts,
+	std::vector<int> &tris, std::vector<QueryPoint> &points,
+	std::vector<nav_off_mesh_link_t> &links, char *err, size_t errsz)
+{
+	model_t *world = qworld_load(path, err, (int)errsz);
+	if (!world) return nullptr;
+	qworld_set_active(world);
+
+	// Geometry: hull-1 polygonization (walkableRadius=0, no erosion).
+	float *hv = nullptr; int hvc = 0; int *ht = nullptr; int htc = 0;
+	nav_hull_begin();
+	nav_hull_add_model(world, nullptr);
+	nav_hull_end(&hv, &hvc, &ht, &htc);
+	verts.assign(hv, hv + (size_t)hvc * 3);
+	tris.assign(ht, ht + (size_t)htc * 3);
+	free(hv); free(ht);
+
+	// Entities: query points (spawns/pickups) + teleporter off-mesh links.
+	auto ents = parse_entities(world->entities);
+	std::unordered_map<std::string,std::array<float,3>> dests;
+	struct Trig { std::string target; int model; };
+	std::vector<Trig> trigs;
+	std::unordered_map<std::string,int> counts;
+	for (auto &kv : ents) {
+		auto ci = kv.find("classname");
+		if (ci == kv.end()) continue;
+		const std::string &cls = ci->second;
+		if (cls == "info_teleport_destination") {
+			auto oi = kv.find("origin");
+			if (oi == kv.end()) continue;
+			float x,y,z; if (sscanf(oi->second.c_str(), "%f %f %f", &x,&y,&z)!=3) continue;
+			auto ti = kv.find("targetname");
+			if (ti != kv.end()) dests[ti->second] = {x,y,z};
+		} else if (cls == "trigger_teleport") {
+			auto mi = kv.find("model");
+			if (mi == kv.end() || mi->second.empty() || mi->second[0] != '*') continue;
+			int n = atoi(mi->second.c_str()+1);
+			auto ti = kv.find("target");
+			trigs.push_back({ ti!=kv.end()?ti->second:"", n });
+		} else if (is_nav_relevant(cls)) {
+			auto oi = kv.find("origin");
+			if (oi == kv.end()) continue;
+			QueryPoint qp;
+			if (sscanf(oi->second.c_str(), "%f %f %f", &qp.pos[0],&qp.pos[1],&qp.pos[2])!=3) continue;
+			std::string label = cls.rfind("info_player",0)==0 ? "spawn" : cls;
+			qp.label = label + "#" + std::to_string(++counts[label]);
+			points.push_back(qp);
+		}
+	}
+	for (auto &t : trigs) {
+		auto di = dests.find(t.target);
+		if (di == dests.end()) continue;
+		if (t.model < 0 || t.model >= world->num_models) continue;
+		nav_off_mesh_link_t l; memset(&l, 0, sizeof(l));
+		l.start[0] = (world->model_mins[t.model][0]+world->model_maxs[t.model][0])*0.5f;
+		l.start[1] = (world->model_mins[t.model][1]+world->model_maxs[t.model][1])*0.5f;
+		l.start[2] = world->model_mins[t.model][2];
+		l.end[0]=di->second[0]; l.end[1]=di->second[1]; l.end[2]=di->second[2];
+		l.radius = 128.0f; l.bidirectional = 0; l.link_type = AI_TELELINK;
+		links.push_back(l);
+	}
+	return world; // kept alive for the link callback; caller frees
+}
+
+static bool ends_with(const char *s, const char *suf)
+{
+	size_t ls = strlen(s), lf = strlen(suf);
+	return ls >= lf && strcmp(s + ls - lf, suf) == 0;
+}
+
 int main(int argc, char **argv)
 {
-	FILE *in = stdin;
-	if (argc > 1) {
-		in = fopen(argv[1], "r");
-		if (!in) { fprintf(stderr, "navcheck: cannot open %s\n", argv[1]); return 2; }
-	}
-
 	std::vector<float> verts;
 	std::vector<int> tris;
 	std::vector<QueryPoint> points;
 	std::vector<nav_off_mesh_link_t> links;
 	char err[256] = {0};
-	if (!read_input(in, verts, tris, points, links, err, sizeof(err))) {
-		fprintf(stderr, "navcheck: input error: %s\n", err);
-		return 2;
+	model_t *world = nullptr; // non-null => BSP mode (link callback active)
+
+	if (argc > 1 && ends_with(argv[1], ".bsp")) {
+		world = load_bsp_scene(argv[1], verts, tris, points, links, err, sizeof(err));
+		if (!world) {
+			fprintf(stderr, "navcheck: %s\n", err);
+			return 2;
+		}
+	} else {
+		FILE *in = stdin;
+		if (argc > 1) {
+			in = fopen(argv[1], "r");
+			if (!in) { fprintf(stderr, "navcheck: cannot open %s\n", argv[1]); return 2; }
+		}
+		if (!read_input(in, verts, tris, points, links, err, sizeof(err))) {
+			fprintf(stderr, "navcheck: input error: %s\n", err);
+			return 2;
+		}
+		if (in != stdin) fclose(in);
 	}
-	if (in != stdin) fclose(in);
 
 	nav_mesh_build_config_t cfg;
 	default_config(&cfg);
 	nav_mesh_summary_t summary;
 	err[0] = 0;
-	nav_mesh_runtime_t *nav = nav_mesh_build(
-		verts.data(), (int)(verts.size()/3),
-		tris.data(), (int)(tris.size()/3),
-		&cfg, links.empty() ? nullptr : links.data(), (int)links.size(),
-		&summary, nullptr, nullptr, err, sizeof(err));
+
+	auto build = [&]() -> nav_mesh_runtime_t * {
+		return nav_mesh_build(
+			verts.data(), (int)(verts.size()/3),
+			tris.data(), (int)(tris.size()/3),
+			&cfg, links.empty() ? nullptr : links.data(), (int)links.size(),
+			&summary, world ? navcheck_link_callback : nullptr, nullptr,
+			err, sizeof(err));
+	};
+	auto append_links = [&](nav_off_mesh_link_t *arr, int n) {
+		for (int i = 0; i < n; i++) links.push_back(arr[i]);
+	};
+
+	nav_mesh_runtime_t *nav = build();
+
+	// Multi-pass connectivity (BSP mode only — the validator needs the tracer):
+	// (2) reconnect orphan clusters via hull-validated jumps, (3) directed
+	// one-way links. Each pass augments off-mesh links and rebuilds, matching
+	// FrikBotNex's Nav_BuildForMap.
+	if (nav && world) {
+		nav_off_mesh_link_t *extra = nullptr;
+		int n = nav_mesh_compute_orphan_jumps(nav, navcheck_link_validate, nullptr, &extra);
+		if (n > 0) { append_links(extra, n); nav_mesh_destroy(nav); nav = build(); }
+		free(extra);
+
+		if (nav) {
+			extra = nullptr;
+			n = nav_mesh_compute_directed_links(nav, navcheck_link_validate, nullptr, &extra);
+			if (n > 0) { append_links(extra, n); nav_mesh_destroy(nav); nav = build(); }
+			free(extra);
+		}
+		qworld_free(world); qworld_set_active(nullptr); world = nullptr;
+	}
+
 	if (!nav) {
 		printf("{\"ok\":false,\"error\":\"build failed: %s\"}\n", err);
 		return 1;

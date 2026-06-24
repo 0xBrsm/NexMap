@@ -16,6 +16,6 @@ set(RECASTNAVIGATION_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../vendor/recastnavigation
                  ${CMAKE_BINARY_DIR}/recastnavigation EXCLUDE_FROM_ALL)
 
-add_executable(navcheck main.cpp nav_mesh.cpp)
+add_executable(navcheck main.cpp nav_mesh.cpp nav_hull.cpp qworld.cpp nav_links.cpp)
 target_compile_options(navcheck PRIVATE -fno-rtti)  # match Recast (built without RTTI)
 target_link_libraries(navcheck Recast Detour DetourCrowd)
