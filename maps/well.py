@@ -1,187 +1,129 @@
 #!/usr/bin/env python3
-"""The Drowning Well — azure city courtyard DM map. Emits out/well.map."""
+"""The Drowning Well — azure-city flooded courtyard DM map, rebuilt on the
+qlayout/qprefab stack. Emits out/well.map.
+
+Spec:
+  theme   city (azure stone, torch-lit)
+  rooms   hub (tall sky-open courtyard, flooded floor + central wellhead),
+          armory (east, weapons), reliquary (north, armor + secret tease)
+  graph   hub --arch--> armory ; hub --arch--> reliquary ; teleporter from
+          the hub floor up to the perimeter gallery
+  verticality  floor (z0) -> two landed stairs -> perimeter gallery (z224)
+  items   seated on pedestals on both tiers; nothing floats
+"""
 import os
-from qgeo import MapWriter, box, cylinder, arch, stairs
+import sys
 
-# Azure city palette per the corpus: dm6's primary pair is cop1_1 + city2_6;
-# city5_4 is dm5's floor tile. wmet4_8 is dm6's own trim metal.
-WALL = "city2_6"
-PIER = "city4_2"
-TRIM = "cop1_1"
-RAIL = "wmet4_8"
-FLOOR = "city5_4"
-GROUND = "city2_7"
-BASIN = "afloor3_1"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import qgeo
+import qprefab as P
+from qlayout import Layout
+
+THEME = "city"
 WATER = "*04water2"
-SKY = "sky4"
-WINDOW = "window02_1"
+GAL = 224                       # perimeter gallery height
+HX = 416                        # hub half-extent
+HZ = 448                        # hub height (open to sky)
 
-m = MapWriter("The Drowning Well", worldtype=0, minlight=8)
-m.props["_sunlight"] = "180"
-m.props["_sun_mangle"] = "135 -70 0"
-m.props["_sunlight_penumbra"] = "6"
-m.props["_sunlight2"] = "55"
+L = Layout("The Drowning Well", THEME, worldtype=0, minlight=10)
+L.props.update({"_sunlight": "160", "_sun_mangle": "20 -65 0",
+                "_sunlight_penumbra": "8", "_sunlight2": "60"})
 
-# ---- shell: outer walls, ground, sky lid (interior +-320, z 0..480) ----
-m.add(box(-352, -352, -16, -320, 352, 496, WALL))
-m.add(box(320, -352, -16, 352, 352, 496, WALL))
-m.add(box(-352, -352, -16, 352, -320, 496, WALL))
-m.add(box(-352, 320, -16, 352, 352, 496, WALL))
-m.add(box(-352, -352, 480, 352, 352, 496, SKY))
+hub = L.room("hub", -HX, -HX, HX, HX, 0, HZ, chamfer=72, sky=True)
+armory = L.room("armory", 448, -192, 832, 192, 0, 256)
+reliquary = L.room("reliquary", -192, 448, 192, 832, 0, 288)
 
-# ---- ground floor ring around the basin ----
-m.add(box(-352, 144, -16, 352, 352, 0, TRIM, zp=GROUND))
-m.add(box(-352, -352, -16, 352, -144, 0, TRIM, zp=GROUND))
-m.add(box(144, -144, -16, 352, 144, 0, TRIM, zp=GROUND))
-m.add(box(-352, -144, -16, -144, 144, 0, TRIM, zp=GROUND))
+L.connect("arch", hub, armory, width=128, height=144)
+L.connect("arch", hub, reliquary, width=128, height=144)
 
-# ---- water basin (pool -128..128, floor -48, surface -8) ----
-m.add(box(-144, -144, -64, 144, 144, -48, BASIN))
-m.add(box(-144, -144, -48, -128, 144, 0, TRIM))
-m.add(box(128, -144, -48, 144, 144, 0, TRIM))
-m.add(box(-128, -144, -48, 128, -128, 0, TRIM))
-m.add(box(-128, 128, -48, 128, 144, 0, TRIM))
-m.add(box(-128, -128, -48, 128, 128, -8, WATER))
-# megahealth pedestal rising flush with the floor
-m.add(cylinder(0, 0, 28, -48, 0, RAIL, sides=8, cap_hi=BASIN))
+# ---- hub: flooded floor + central wellhead ----------------------------------
+TRIM = "cop2_3"
+PIER = "city2_6"
+# shallow flood across the whole floor, ringed lip so it reads as water
+hub.add(qgeo.box(-HX, -HX, 0, HX, HX, 16, WATER))
+for lip in ((-HX, -HX, HX, -HX + 16), (-HX, HX - 16, HX, HX),
+            (-HX, -HX, -HX + 16, HX), (HX - 16, -HX, HX, HX)):
+    hub.add(qgeo.box(lip[0], lip[1], 0, lip[2], lip[3], 28, TRIM))
+# central octagonal wellhead rising from the water, megahealth on top
+hub.add(qgeo.cylinder(0, 0, 96, 0, 48, PIER, sides=8, cap_hi=TRIM))
+hub.place(P.item_pedestal(0, 0, 48, "item_health", THEME, height=8,
+                          spawnflags=2))      # megahealth, seated & reachable
+hub.add(qgeo.cylinder(0, 0, 64, 48, 56, WATER, sides=8))  # well water surface
 
-# ---- bottom arcade at the shaft edge (+-192..224 band, piers + arches) ----
-def piers(z1, z2):
-    for cx in (-192, 192):
-        for cy in (-192, 192):
-            m.add(box(cx - 32, cy - 32, z1, cx + 32, cy + 32, z2, PIER))
-    for c in (-208, 208):
-        m.add(box(-16, c - 16, z1, 16, c + 16, z2, PIER))
-        m.add(box(c - 16, -16, z1, c + 16, 16, z2, PIER))
-
-piers(0, 160)
-for s in (-1, 1):
-    d1, d2 = (192, 224) if s > 0 else (-224, -192)
-    for a1, a2 in ((-176, -16), (16, 176)):
-        m.add(arch("x", a1, a2, d1, d2, 104, 40, 160, WALL, segments=4))
-        m.add(arch("y", a1, a2, d1, d2, 104, 40, 160, WALL, segments=4))
-
-# ---- mid gallery floor ring (z 160..176, inner edge at +-192) ----
-m.add(box(-320, 192, 160, 320, 320, 176, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(-320, -320, 160, 192, -192, 176, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(-320, -192, 160, -192, 192, 176, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(192, -56, 160, 320, 320, 176, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(192, -320, 160, 256, -56, 176, TRIM, zp=FLOOR, zn=WALL))  # catwalk by stairwell
-
-# ---- mid arcade: piers, jump-over parapets, arch headers ----
-piers(176, 320)
-for s in (-1, 1):
-    d1, d2 = (192, 224) if s > 0 else (-224, -192)
-    r1, r2 = (192, 208) if s > 0 else (-208, -192)
-    for a1, a2 in ((-176, -16), (16, 176)):
-        m.add(arch("x", a1, a2, d1, d2, 256, 48, 320, WALL, segments=4))
-        m.add(arch("y", a1, a2, d1, d2, 256, 48, 320, WALL, segments=4))
-        m.add(box(a1, r1, 176, a2, r2, 216, RAIL))
-        m.add(box(r1, a1, 176, r2, a2, 216, RAIL))
-
-# ---- top rampart floor ring (z 320..336) ----
-m.add(box(-256, 192, 320, 320, 320, 336, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(-320, -320, 320, 320, -192, 336, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(192, -192, 320, 320, 192, 336, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(-320, -192, 320, -192, 80, 336, TRIM, zp=FLOOR, zn=WALL))
-m.add(box(-256, 80, 320, -192, 320, 336, TRIM, zp=FLOOR, zn=WALL))  # catwalk by stairwell
-
-# ---- crenellated inner parapet at the well mouth ----
-for s in (-1, 1):
-    r1, r2 = (192, 208) if s > 0 else (-208, -192)
-    m.add(box(-208, r1, 336, 208, r2, 376, RAIL))
-    m.add(box(r1, -208, 336, r2, 208, 376, RAIL))
-    for c in (-192, -144, -48, 48, 144, 192):
-        w = 16 if abs(c) == 192 else 24
-        m.add(box(c - w, r1, 376, c + w, r2, 416, WALL))
-        m.add(box(r1, c - w, 376, r2, c + w, 416, WALL))
-
-# ---- stairs: ground -> gallery (east wall), gallery -> top (west wall) ----
-m.add(stairs(256, -320, 320, -56, 0, 176, "y", "+", WALL, top_tex=FLOOR))
-m.add(stairs(-320, 80, -256, 320, 176, 336, "y", "+", WALL, top_tex=FLOOR))
-
-# ---- teleporter: ground NE corner -> top SW rampart ----
-m.add(box(216, 296, 0, 232, 320, 168, PIER))
-m.add(box(296, 296, 0, 312, 320, 168, PIER))
-m.add(arch("x", 232, 296, 296, 320, 168, 32, 208, PIER, segments=4))
-m.add(box(232, 308, 8, 296, 320, 160, "*teleport"))
-m.add(box(216, 240, 0, 312, 320, 8, TRIM, zp="tele_top"))
-m.ent("trigger_teleport", brush=box(232, 296, 8, 296, 316, 152, "black"),
-      target="welltop")
-m.ent("info_teleport_destination", origin="-264 -264 360", angle="45",
-      targetname="welltop")
-m.light(264, 280, 176, 300)
-m.light(264, 232, 64, 200, wait=0.9)
-m.ent("light_torch_small_walltorch", origin="200 312 112")
-m.ent("light_torch_small_walltorch", origin="304 264 112")
-
-# ---- windows on the top-tier outer walls, one per side ----
-m.add(box(-32, 312, 384, 32, 320, 448, TRIM, yn=WINDOW))
-m.add(box(-32, -320, 384, 32, -312, 448, TRIM, yp=WINDOW))
-m.add(box(312, -32, 384, 320, 32, 448, TRIM, xn=WINDOW))
-m.add(box(-320, -32, 384, -312, 32, 448, TRIM, xp=WINDOW))
-for x, y in ((0, 288), (0, -288), (288, 0), (-288, 0)):
-    m.light(x, y, 416, 140, wait=1.1)
-
-# ---- torches: ground ring ----
-for x, y in ((-160, 312), (160, 312), (-160, -312), (160, -312),
-             (-312, 160), (-312, -160)):
-    m.ent("light_torch_small_walltorch", origin=f"{x} {y} 96")
-m.ent("light_torch_small_walltorch", origin="312 -240 120")  # over the stairs
-m.ent("light_torch_small_walltorch", origin="312 -104 200")
-# shaft piers, facing the water
-for x, y in ((0, -180), (0, 180), (-180, 0), (180, 0)):
-    m.ent("light_torch_small_walltorch", origin=f"{x} {y} 112")
-
-# ---- torches: gallery ring ----
-for x, y in ((-160, 312), (160, 312), (-160, -312), (160, -312),
-             (-312, -160), (312, 160), (312, -160), (-312, 160)):
-    m.ent("light_torch_small_walltorch", origin=f"{x} {y} 256")
-
-# ---- top tier: corner pedestal flames ----
+# corner shrine pillars
 for sx in (-1, 1):
     for sy in (-1, 1):
-        px, py = 280 * sx, 280 * sy
-        m.add(box(px - 16, py - 16, 336, px + 16, py + 16, 376, PIER, zp=RAIL))
-        m.ent("light_flame_large_yellow", origin=f"{px} {py} 392")
+        hub.place(P.pillar(sx * 300, sy * 300, 0, HZ, THEME, round_=True))
 
-# ---- fill lights: pool glow, gallery soffits, stair tops ----
-for x, y in ((-96, -96), (-96, 96), (96, -96), (96, 96)):
-    m.light(x, y, 48, 170, wait=0.9)
-for x, y in ((0, -240), (0, 240), (-240, 0), (240, 0)):
-    m.light(x, y, 280, 140, wait=1.2)
-m.light(288, -88, 200, 175)
-m.light(-288, 288, 360, 175)
-m.ent("light_torch_small_walltorch", origin="-312 160 280")  # west stairwell
-m.light(288, -288, 80, 150)   # east stair base
-m.light(-288, 112, 260, 140)  # west stair base
+# ---- perimeter gallery at z=224 (walkway ring) + landed stairs --------------
+for x1, y1, x2, y2 in ((-HX, 320, HX, HX), (-HX, -HX, HX, -320),
+                       (320, -320, HX, 320), (-HX, -320, -320, 320)):
+    hub.add(P.walkway(x1, y1, x2, y2, GAL, THEME, railing=True).brushes)
 
-# ---- items ----
-m.ent("weapon_rocketlauncher", origin="0 256 200")
-m.ent("weapon_grenadelauncher", origin="0 -256 24")
-m.ent("weapon_supernailgun", origin="256 0 360")
-m.ent("item_armor2", origin="-256 0 200")
-m.ent("item_health", origin="0 0 24", spawnflags=2)        # megahealth
-m.ent("item_rockets", origin="64 -256 24")
-m.ent("item_rockets", origin="128 -256 24")
-m.ent("item_spikes", origin="256 64 360")
-m.ent("item_spikes", origin="256 -64 360")
-m.ent("item_shells", origin="-256 -96 200")
-m.ent("item_shells", origin="-256 -160 200")
-m.ent("item_health", origin="288 -96 24")
-m.ent("item_health", origin="96 288 24")
-m.ent("item_health", origin="224 -224 200", spawnflags=1)  # rotten, catwalk
-m.ent("item_health", origin="-224 224 360", spawnflags=1)
+hub.place(P.stairs_landed(-HX, 96, -160, 360, 0, GAL, "x", "-", THEME))
+hub.place(P.stairs_landed(160, -360, HX, -96, 0, GAL, "x", "+", THEME))
 
-# ---- spawns ----
-m.ent("info_player_start", origin="-256 256 24", angle="315")
-m.ent("info_player_deathmatch", origin="96 -256 24", angle="90")
-m.ent("info_player_deathmatch", origin="-256 96 200", angle="270")
-m.ent("info_player_deathmatch", origin="256 256 200", angle="180")
-m.ent("info_player_deathmatch", origin="0 -256 360", angle="90")
+# teleporter: hub floor SW -> NE gallery
+hub.place(P.teleporter_pad(-320, -320, 28, THEME, target="well_gallery",
+                           dest_name="well_gallery",
+                           dest_origin=(340, 340, GAL + 24)))
 
-# ---- ambience ----
-m.ent("ambient_drip", origin="80 80 16")
-m.ent("ambient_drip", origin="-80 -80 16")
+# ---- lighting: torch grammar + sun fill (city reads brighter than metal) ----
+for (x, y), face in ((( -HX + 12, 0), (1, 0)), ((HX - 12, 0), (-1, 0)),
+                     ((0, -HX + 12), (0, 1)), ((0, HX - 12), (0, -1))):
+    for z in (130, 320):
+        hub.fixture(x, y, z, wall_normal=face)
+for sx in (-1, 1):
+    for sy in (-1, 1):
+        hub.ent("light_flame_large_yellow",
+                origin=f"{sx*300:g} {sy*300:g} 360")
+for gx in (-240, 0, 240):
+    for gy in (-240, 0, 240):
+        hub.light(gx, gy, 300, 150, wait="1.1")        # soft pooled sky fill
+for gx in (-300, 300):                                  # gallery wash
+    for gy in (-300, 300):
+        hub.light(gx, gy, GAL + 80, 170)
 
-m.write(os.path.join(os.path.dirname(__file__), "..", "out", "well.map"))
+# ---- armory (east): weapons on pedestals, lit alcoves -----------------------
+for fx in (560, 720):
+    armory.fixture(fx, -180, 150, wall_normal=(0, 1))
+    armory.fixture(fx, 180, 150, wall_normal=(0, -1))
+armory.light(640, 0, 200, 180)
+armory.item("weapon_rocketlauncher", 560, 0)
+armory.item("weapon_supernailgun", 760, -120)
+armory.item("item_armorInv", 760, 120)
+armory.place(P.wainscot(470, -180, 810, 180, 0, THEME, height=64))
+armory.spawn(640, 0, angle=180)
+
+# ---- reliquary (north): armor, a teased upper niche --------------------------
+for fy in (560, 720):
+    reliquary.fixture(-180, fy, 180, wall_normal=(1, 0))
+    reliquary.fixture(180, fy, 180, wall_normal=(-1, 0))
+reliquary.light(0, 640, 220, 180)
+reliquary.item("item_armor2", 0, 560)
+# secret tease: a raised niche with a quad, reachable only by the side ledges
+reliquary.add(qgeo.box(-64, 760, 0, 64, 832, 96, PIER, zp="city4_7"))
+reliquary.place(P.item_pedestal(0, 796, 96, "item_artifact_super_damage",
+                                THEME, height=8))
+reliquary.place(P.walkway(-192, 700, -120, 832, 96, THEME, railing=False))
+reliquary.place(P.walkway(120, 700, 192, 832, 96, THEME, railing=False))
+reliquary.spawn(0, 520, angle=90)
+
+# ---- hub spawns (floor + gallery) -------------------------------------------
+hub.spawn(-340, 300, angle=315, dm=False)        # info_player_start
+hub.spawn(300, -340, angle=135)
+hub.ent("info_player_deathmatch", origin=f"-360 360 {GAL+24:g}", angle="315")
+hub.ent("info_player_deathmatch", origin=f"360 -360 {GAL+24:g}", angle="135")
+
+# gallery items (seated on the gallery deck, opposite the gallery spawns)
+hub.place(P.item_pedestal(360, 360, GAL, "item_rockets", THEME, height=8))
+hub.place(P.item_pedestal(-360, -360, GAL, "item_cells", THEME, height=8))
+
+hub.ent("ambient_drip", origin="120 -120 20")
+hub.ent("ambient_drip", origin="-120 120 20")
+
+out = os.path.join(os.path.dirname(__file__), "..", "out", "well.map")
+L.write(out)
+print("wrote", os.path.abspath(out))
+

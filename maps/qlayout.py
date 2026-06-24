@@ -101,6 +101,9 @@ class Room:
         self._ents.append(("light", {"origin": f"{x:g} {y:g} {z:g}",
                                       "light": v, **keys}, None))
 
+    def ent(self, classname, brush=None, **keys):
+        self._ents.append((classname, keys, brush))
+
     def fixture(self, x, y, z, value=None, wall_normal=None):
         self.place(P.light_fixture(x, y, z, self.theme, value, wall_normal))
 
