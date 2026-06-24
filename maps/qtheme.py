@@ -48,6 +48,17 @@ METRICS = {
     "recess_h": 64,
 }
 
+# Flow / topology bands, measured by tools/qflow.py over the 38 id .map sources
+# (walkable nav-graph metrics). These are the targets a playable layout should
+# hit; qcheck warns when a map falls outside them. dead_end_ratio and
+# loop_density are the clean discriminators — the unplayable Well v1 scored
+# dead 0.77 / loops 0.24 where every id map sits at dead <=0.19 / loops >=0.45.
+FLOW_BANDS = {
+    "loop_density":     {"warn_below": 0.5,  "median": 0.97},   # E-N+C per node
+    "dead_end_ratio":   {"warn_above": 0.22, "median": 0.06},   # deg<=1 in main
+    "elevation_levels": {"warn_below": 3,    "median": 13},     # distinct 16u
+}
+
 # Palette dicts. Keys used by qprefab/qlayout:
 #   wall/floor/ceiling/trim  - primary surfaces
 #   pier                     - pillars, jambs, structural verticals
