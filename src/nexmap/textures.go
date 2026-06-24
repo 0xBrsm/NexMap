@@ -347,11 +347,29 @@ func MaterializeTextureWAD(dir string) (string, error) {
 		fmt.Fprintf(os.Stderr, "note: real textures unavailable, using synthetic: %v\n", err)
 	}
 
-	// Collect all texture names we need.
+	// Collect all texture names: base set + all theme pool textures.
 	needed := []string{
 		Textures.Floor, Textures.Ceiling, Textures.Shell, Textures.Fill,
 		Textures.Lava, Textures.Water, Textures.Slime,
-		"*water0", "*slime0", "*teleport",
+		"*water0", "*slime0", "*teleport", "*lava1",
+	}
+	// Add every texture from both themes.
+	for _, th := range []*Theme{&ThemeTech, &ThemeCastle} {
+		for _, pool := range [][]WeightedTex{
+			th.Building.Walls, th.Building.Floors, th.Building.Ceilings,
+			th.Hallway.Walls, th.Hallway.Floors, th.Hallway.Ceilings,
+			th.Cave.Naturals, th.Outdoor.Floors, th.Outdoor.Naturals,
+		} {
+			for _, wt := range pool {
+				needed = append(needed, wt.Name)
+			}
+		}
+	}
+	// Add every texture from palettes.
+	for _, pals := range [][]TexturePalette{TechPalettes, CastlePalettes} {
+		for _, p := range pals {
+			needed = append(needed, p.Wall, p.Floor, p.Ceiling, p.Trim)
+		}
 	}
 
 	var entries []struct {

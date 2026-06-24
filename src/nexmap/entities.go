@@ -240,12 +240,22 @@ func placeTeleporters(
 		})
 		*placed = append(*placed, [2]int{dx, dy})
 
-		// Trigger.
+		// Teleporter pad + trigger.
 		sx, sy := pickXY(rng, srcRoom, srcPool, "any", *placed)
 		tw := 32
+		padH := 8
+
+		// Visible pad (raised platform with teleport texture).
+		m.AddBrush(AxisAlignedBox(
+			sx-tw-8, sy-tw-8, srcRoom.Z0,
+			sx+tw+8, sy+tw+8, srcRoom.Z0+padH,
+			"*teleport",
+		))
+
+		// Trigger volume (sits on top of pad).
 		triggerBrush := AxisAlignedBox(
-			sx-tw, sy-tw, srcRoom.Z0,
-			sx+tw, sy+tw, srcRoom.Z0+64,
+			sx-tw, sy-tw, srcRoom.Z0+padH,
+			sx+tw, sy+tw, srcRoom.Z0+padH+64,
 			"*teleport",
 		)
 		m.Entities = append(m.Entities, Entity{
@@ -255,6 +265,10 @@ func placeTeleporters(
 			},
 			Brushes: []Brush{triggerBrush},
 		})
+
+		// Light above the pad.
+		m.AddLight(sx, sy, srcRoom.Z0+padH+48, 200)
+
 		*placed = append(*placed, [2]int{sx, sy})
 
 		// Reverse if bidirectional.
@@ -268,17 +282,24 @@ func placeTeleporters(
 			*placed = append(*placed, [2]int{dx2, dy2})
 
 			sx2, sy2 := pickXY(rng, dstRoom, dstPool, "any", *placed)
+			// Visible pad.
+			m.AddBrush(AxisAlignedBox(
+				sx2-tw-8, sy2-tw-8, dstRoom.Z0,
+				sx2+tw+8, sy2+tw+8, dstRoom.Z0+padH,
+				"*teleport",
+			))
 			m.Entities = append(m.Entities, Entity{
 				Properties: map[string]string{
 					"classname": "trigger_teleport",
 					"target":    revName,
 				},
 				Brushes: []Brush{AxisAlignedBox(
-					sx2-tw, sy2-tw, dstRoom.Z0,
-					sx2+tw, sy2+tw, dstRoom.Z0+64,
+					sx2-tw, sy2-tw, dstRoom.Z0+padH,
+					sx2+tw, sy2+tw, dstRoom.Z0+padH+64,
 					"*teleport",
 				)},
 			})
+			m.AddLight(sx2, sy2, dstRoom.Z0+padH+48, 200)
 			*placed = append(*placed, [2]int{sx2, sy2})
 		}
 	}

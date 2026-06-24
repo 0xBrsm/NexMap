@@ -477,6 +477,10 @@ func buildIntersectionFills(m *MapFile, gi *GridInfo, zLo, zHi int) {
 }
 
 func BuildBlueprintGeometry(m *MapFile, layout *Layout, gi *GridInfo) {
+	BuildBlueprintGeometryThemed(m, layout, gi, nil, nil, nil)
+}
+
+func BuildBlueprintGeometryThemed(m *MapFile, layout *Layout, gi *GridInfo, th *Theme, roomEnvs []string, roomDetails [][]Detail) {
 	zLo, zHi := computeZRange(layout)
 
 	buildShell(m, gi, zLo, zHi)
@@ -484,15 +488,46 @@ func BuildBlueprintGeometry(m *MapFile, layout *Layout, gi *GridInfo) {
 	buildIntersectionFills(m, gi, zLo, zHi)
 	buildEmptyCellFills(m, gi, zLo, zHi)
 
+	// Use a deterministic RNG for material selection seeded from room count.
+	matRng := rand.New(rand.NewPCG(uint64(len(layout.Rooms)*31), 0))
+
 	for i := range layout.Rooms {
 		p, hasPool := layout.Pools[i]
 		var pp *Pool
 		if hasPool {
 			pp = &p
 		}
-		BuildRoomBrushes(m, &layout.Rooms[i], pp)
+
+		var mat *RoomMaterials
+		if th != nil {
+			env := "building"
+			if roomEnvs != nil && i < len(roomEnvs) {
+				env = roomEnvs[i]
+			}
+			rm := PickRoomMaterials(matRng, th, env)
+			mat = &rm
+		}
+
+		BuildRoomBrushesThemed(m, &layout.Rooms[i], pp, mat)
+
+		// Place details if specified.
+		if roomDetails != nil && i < len(roomDetails) {
+			for _, d := range roomDetails[i] {
+				rm := RoomMaterials{Wall: Textures.Shell, Floor: Textures.Floor, Ceiling: Textures.Ceiling}
+				if mat != nil {
+					rm = *mat
+				}
+				PlaceDetail(m, &layout.Rooms[i], pp, d, &rm, matRng)
+			}
+		}
+	}
+
+	hallMat := (*RoomMaterials)(nil)
+	if th != nil {
+		hm := PickRoomMaterials(matRng, th, "hallway")
+		hallMat = &hm
 	}
 	for i := range layout.Corridors {
-		BuildCorridorBrushes(m, &layout.Corridors[i], layout.Rooms)
+		BuildCorridorBrushesThemed(m, &layout.Corridors[i], layout.Rooms, hallMat)
 	}
 }

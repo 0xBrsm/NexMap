@@ -78,16 +78,18 @@ type rawPlayerCount struct {
 }
 
 type rawRoom struct {
-	ID        string          `json:"id"`
-	Role      string          `json:"role"`
-	Label     string          `json:"label,omitempty"`
-	Size      string          `json:"size,omitempty"`
-	Shape     string          `json:"shape,omitempty"`
-	Elevation string          `json:"elevation,omitempty"`
-	Ceiling   string          `json:"ceiling,omitempty"`
-	Hazard    *rawHazard      `json:"hazard,omitempty"`
-	Items     []rawItem       `json:"items,omitempty"`
-	Tags      []string        `json:"tags,omitempty"`
+	ID          string          `json:"id"`
+	Role        string          `json:"role"`
+	Label       string          `json:"label,omitempty"`
+	Size        string          `json:"size,omitempty"`
+	Shape       string          `json:"shape,omitempty"`
+	Elevation   string          `json:"elevation,omitempty"`
+	Ceiling     string          `json:"ceiling,omitempty"`
+	Environment string          `json:"environment,omitempty"` // building, cave, outdoor, hallway
+	Details     []string        `json:"details,omitempty"`     // pillars, platform, light_recesses, wall_trim, crates, step_down
+	Hazard      *rawHazard      `json:"hazard,omitempty"`
+	Items       []rawItem       `json:"items,omitempty"`
+	Tags        []string        `json:"tags,omitempty"`
 }
 
 type rawHazard struct {
@@ -149,6 +151,8 @@ type ResolvedRoom struct {
 	ElevationMin int
 	ElevationMax int
 	CeilingHeight int
+	Environment  string   // building, cave, outdoor, hallway
+	Details      []Detail // architectural details to place
 	Hazard       *ResolvedHazard
 	Items        []ResolvedItem
 	Tags         []string
@@ -369,6 +373,11 @@ func resolveRoom(r rawRoom) ResolvedRoom {
 		})
 	}
 
+	var details []Detail
+	for _, d := range r.Details {
+		details = append(details, Detail(d))
+	}
+
 	return ResolvedRoom{
 		ID:           r.ID,
 		Role:         r.Role,
@@ -379,6 +388,8 @@ func resolveRoom(r rawRoom) ResolvedRoom {
 		ElevationMin: er[0],
 		ElevationMax: er[1],
 		CeilingHeight: ch,
+		Environment:  orDefault(r.Environment, "building"),
+		Details:      details,
 		Hazard:       hazard,
 		Items:        items,
 		Tags:         r.Tags,

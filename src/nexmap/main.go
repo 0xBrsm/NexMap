@@ -72,7 +72,26 @@ func main() {
 		m = NewMapFile()
 		m.Worldspawn.Properties["message"] = resolved.Name
 
-		BuildBlueprintGeometry(m, result.Layout, result.Grid)
+		th := GetTheme(resolved.Theme)
+		var roomEnvs []string
+		var roomDetails [][]Detail
+		for _, br := range resolved.Rooms {
+			idx, ok := result.IDToIdx[br.ID]
+			if !ok {
+				continue
+			}
+			// Grow slices to fit.
+			for len(roomEnvs) <= idx {
+				roomEnvs = append(roomEnvs, "building")
+			}
+			for len(roomDetails) <= idx {
+				roomDetails = append(roomDetails, nil)
+			}
+			roomEnvs[idx] = br.Environment
+			roomDetails[idx] = br.Details
+		}
+
+		BuildBlueprintGeometryThemed(m, result.Layout, result.Grid, th, roomEnvs, roomDetails)
 		PopulateFromBlueprint(m, result.Layout, resolved, result.IDToIdx, result.TeleConns, rng)
 
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")

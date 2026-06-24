@@ -402,20 +402,8 @@ func PopulateDM(m *MapFile, layout *Layout, rng *rand.Rand) {
 		placed = append(placed, [2]int{px, py})
 	}
 
-	// Lights.
-	for _, room := range layout.Rooms {
-		m.AddLight(room.CX(), room.CY(), room.Z1-16, 300)
-		if room.Width() > 400 && room.Height() > 400 {
-			qx := room.Width() / 4
-			qy := room.Height() / 4
-			for _, d := range [][2]int{{-qx, -qy}, {qx, -qy}, {-qx, qy}, {qx, qy}} {
-				m.AddLight(room.CX()+d[0], room.CY()+d[1], room.Z1-16, 200)
-			}
-		}
-	}
-	for _, c := range layout.Corridors {
-		m.AddLight((c.X0+c.X1)/2, (c.Y0+c.Y1)/2, c.Z1-8, 200)
-	}
+	// Context-aware lighting.
+	placeContextLights(m, layout)
 }
 
 const minEntitySpacing = 64
@@ -569,18 +557,46 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 	if !nav.Connected {
 		status = fmt.Sprintf("%d unreachable", len(nav.UnreachableRooms))
 	}
-	fmt.Printf("rooms=%d  corridors=%d  %s\n",
-		len(layout.Rooms), len(layout.Corridors), status)
+
+	// Pick a random theme.
+	themes := []*Theme{&ThemeTech, &ThemeCastle}
+	theme := themes[rng.IntN(len(themes))]
+	fmt.Printf("rooms=%d  corridors=%d  %s  theme=%s\n",
+		len(layout.Rooms), len(layout.Corridors), status, theme.Name)
 
 	m := NewMapFile()
 	m.Worldspawn.Properties["message"] = "procgen"
 
-	// Use the same geometry builders as blueprint mode.
 	gi := procgenGridInfo(layout)
 	zLo, zHi := computeZRange(layout)
 
 	buildShell(m, gi, zLo, zHi)
 	BuildGapFills(m, layout, zLo, zHi)
+
+	// Pick 1-2 palettes for the map. Adjacent rooms share a palette for coherence.
+	pal1 := PickPalette(rng, theme)
+	pal2 := PickPalette(rng, theme)
+	// Ensure pal2 is different from pal1.
+	pals := PalettesForTheme(theme)
+	if len(pals) > 1 {
+		for pal2.Name == pal1.Name {
+			pal2 = pals[rng.IntN(len(pals))]
+		}
+	}
+
+	roomMats := make([]RoomMaterials, len(layout.Rooms))
+	for i := range layout.Rooms {
+		// Alternate palettes: even rooms get pal1, odd get pal2.
+		if i%2 == 0 {
+			roomMats[i] = pal1.ToRoomMaterials()
+		} else {
+			roomMats[i] = pal2.ToRoomMaterials()
+		}
+	}
+	fmt.Printf("palettes: %s / %s\n", pal1.Name, pal2.Name)
+
+	// Hallway materials: use trim from primary palette.
+	hallMat := RoomMaterials{Wall: pal1.Trim, Floor: pal1.Floor, Ceiling: pal1.Ceiling}
 
 	for i := range layout.Rooms {
 		p, hasPool := layout.Pools[i]
@@ -588,10 +604,16 @@ func RunProcgen(rng *rand.Rand, arenaSize, maxDepth int) (*MapFile, *Layout) {
 		if hasPool {
 			pp = &p
 		}
-		BuildRoomBrushes(m, &layout.Rooms[i], pp)
+		BuildRoomBrushesThemed(m, &layout.Rooms[i], pp, &roomMats[i])
+
+		// Add architectural details.
+		details := RandomDetails(rng, &layout.Rooms[i], hasPool)
+		for _, d := range details {
+			PlaceDetail(m, &layout.Rooms[i], pp, d, &roomMats[i], rng)
+		}
 	}
 	for i := range layout.Corridors {
-		BuildCorridorBrushes(m, &layout.Corridors[i], layout.Rooms)
+		BuildCorridorBrushesThemed(m, &layout.Corridors[i], layout.Rooms, &hallMat)
 	}
 
 	PopulateDM(m, layout, rng)
@@ -617,5 +639,74 @@ func procgenGridInfo(layout *Layout) *GridInfo {
 		RowHeights: []int{maxY - minY},
 		NCols:      1,
 		NRows:      1,
+	}
+}
+
+// --- Context-aware light placement ---
+// Places lights where architecture suggests them:
+// - Corridor entrances (where corridors meet rooms)
+// - Room perimeter at regular intervals (wall-wash)
+// - Above pools/hazards
+// - Corridor midpoints
+
+func placeContextLights(m *MapFile, layout *Layout) {
+	// Find where corridors connect to rooms for entrance lights.
+	for _, c := range layout.Corridors {
+		// Light at each end of the corridor (room entrances).
+		if c.Axis == "x" {
+			cy := (c.Y0 + c.Y1) / 2
+			m.AddLight(c.X0+16, cy, c.Z1-8, 200) // room A entrance
+			m.AddLight(c.X1-16, cy, c.Z1-8, 200) // room B entrance
+			// Midpoint if corridor is long.
+			if c.X1-c.X0 > 64 {
+				m.AddLight((c.X0+c.X1)/2, cy, c.Z1-8, 150)
+			}
+		} else {
+			cx := (c.X0 + c.X1) / 2
+			m.AddLight(cx, c.Y0+16, c.Z1-8, 200)
+			m.AddLight(cx, c.Y1-16, c.Z1-8, 200)
+			if c.Y1-c.Y0 > 64 {
+				m.AddLight(cx, (c.Y0+c.Y1)/2, c.Z1-8, 150)
+			}
+		}
+	}
+
+	for i, room := range layout.Rooms {
+		headroom := room.Z1 - room.Z0
+		lightZ := room.Z1 - 16
+
+		// Perimeter lights along walls at regular intervals.
+		spacing := 192
+		inset := 32
+
+		// South and north walls.
+		for x := room.X0 + spacing/2; x < room.X1; x += spacing {
+			m.AddLight(x, room.Y0+inset, lightZ, 150)
+			m.AddLight(x, room.Y1-inset, lightZ, 150)
+		}
+		// West and east walls (skip corners already covered).
+		for y := room.Y0 + spacing; y < room.Y1-spacing/2; y += spacing {
+			m.AddLight(room.X0+inset, y, lightZ, 150)
+			m.AddLight(room.X1-inset, y, lightZ, 150)
+		}
+
+		// Central fill light for large rooms (dimmer).
+		if room.Width() > 300 && room.Height() > 300 {
+			m.AddLight(room.CX(), room.CY(), lightZ, 100)
+		}
+
+		// Pool/hazard highlight.
+		if p, ok := layout.Pools[i]; ok {
+			poolCX := (p.X0 + p.X1) / 2
+			poolCY := (p.Y0 + p.Y1) / 2
+			m.AddLight(poolCX, poolCY, lightZ, 200)
+		}
+
+		// Tall rooms get lower wall lights too.
+		if headroom > 200 {
+			midZ := room.Z0 + headroom/2
+			m.AddLight(room.X0+inset, room.CY(), midZ, 100)
+			m.AddLight(room.X1-inset, room.CY(), midZ, 100)
+		}
 	}
 }

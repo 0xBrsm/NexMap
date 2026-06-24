@@ -1,0 +1,156 @@
+{
+  "version": 1,
+  "meta": {
+    "name": "The Foundry",
+    "author": "NexMap LLM",
+    "description": "A decommissioned industrial complex built around a central smelting chamber. The rocket launcher sits on a raised platform overlooking a lava pit — grab it and you own the room, but you're exposed from three sides. The upper catwalks provide sightlines but limited cover.",
+    "theme": "tech",
+    "gamemode": "deathmatch",
+    "player_count": {"min": 2, "max": 6},
+    "arena_size": 3072,
+    "design_notes": "Three-tier vertical play. The smelting floor is the risk/reward center. Upper catwalks reward map control. The maintenance tunnels provide safe but slow flanking routes."
+  },
+
+  "rooms": [
+    {
+      "id": "smelting",
+      "role": "arena",
+      "label": "Smelting Chamber",
+      "size": "huge",
+      "shape": "square",
+      "elevation": "ground",
+      "ceiling": "cavernous",
+      "environment": "building",
+      "details": ["platform", "light_recesses"],
+      "hazard": {"type": "lava", "coverage": "medium"},
+      "items": [
+        {"classname": "weapon_rocketlauncher", "placement": "center", "intent": "On the platform — you have to hold the high ground"},
+        {"classname": "item_rockets", "placement": "near_hazard", "count": 2},
+        {"classname": "item_health", "placement": "wall", "count": 2},
+        {"classname": "info_player_deathmatch", "placement": "corner", "count": 2},
+        {"classname": "light", "count": 4}
+      ],
+      "tags": ["high_traffic", "risk_reward", "vertical"]
+    },
+    {
+      "id": "east_catwalk",
+      "role": "sniper_perch",
+      "label": "East Catwalk",
+      "size": "medium",
+      "shape": "wide",
+      "elevation": "high",
+      "ceiling": "normal",
+      "environment": "building",
+      "details": ["wall_trim"],
+      "items": [
+        {"classname": "weapon_lightning", "placement": "center", "intent": "Hitscan dominance from the high ground"},
+        {"classname": "item_cells", "placement": "wall"},
+        {"classname": "item_armor2", "placement": "corner"},
+        {"classname": "info_player_deathmatch", "placement": "any"},
+        {"classname": "light", "count": 2}
+      ],
+      "tags": ["defensible", "sightline"]
+    },
+    {
+      "id": "west_catwalk",
+      "role": "sniper_perch",
+      "label": "West Catwalk",
+      "size": "medium",
+      "shape": "wide",
+      "elevation": "high",
+      "ceiling": "normal",
+      "environment": "building",
+      "details": ["wall_trim"],
+      "items": [
+        {"classname": "weapon_supernailgun", "placement": "center"},
+        {"classname": "item_spikes", "placement": "wall"},
+        {"classname": "item_armor1", "placement": "corner"},
+        {"classname": "info_player_deathmatch", "placement": "any"},
+        {"classname": "light", "count": 2}
+      ],
+      "tags": ["defensible", "sightline"]
+    },
+    {
+      "id": "maintenance_north",
+      "role": "transition",
+      "label": "North Maintenance",
+      "size": "small",
+      "shape": "wide",
+      "elevation": "low",
+      "ceiling": "low",
+      "environment": "hallway",
+      "details": ["crates"],
+      "items": [
+        {"classname": "weapon_supershotgun", "placement": "center"},
+        {"classname": "item_shells", "placement": "wall"},
+        {"classname": "item_health", "placement": "wall"},
+        {"classname": "info_player_deathmatch", "placement": "any"},
+        {"classname": "light", "count": 2}
+      ],
+      "tags": ["flanking", "dangerous"]
+    },
+    {
+      "id": "maintenance_south",
+      "role": "transition",
+      "label": "South Maintenance",
+      "size": "small",
+      "shape": "wide",
+      "elevation": "low",
+      "ceiling": "low",
+      "environment": "hallway",
+      "details": ["crates"],
+      "items": [
+        {"classname": "weapon_grenadelauncher", "placement": "center", "intent": "Area denial in the tight space"},
+        {"classname": "item_rockets", "placement": "wall"},
+        {"classname": "item_health", "placement": "wall"},
+        {"classname": "info_player_deathmatch", "placement": "any"},
+        {"classname": "light", "count": 2}
+      ],
+      "tags": ["flanking", "dangerous"]
+    },
+    {
+      "id": "armory",
+      "role": "control_point",
+      "label": "The Armory",
+      "size": "medium",
+      "elevation": "mid",
+      "ceiling": "normal",
+      "environment": "building",
+      "details": ["pillars", "light_recesses"],
+      "items": [
+        {"classname": "item_armorInv", "placement": "center", "intent": "Red armor — the secondary objective"},
+        {"classname": "weapon_nailgun", "placement": "wall"},
+        {"classname": "item_spikes", "placement": "wall"},
+        {"classname": "item_health", "placement": "corner", "count": 3},
+        {"classname": "item_artifact_super_damage", "placement": "hidden", "intent": "Quad tucked in a corner — map knowledge reward"},
+        {"classname": "info_player_deathmatch", "placement": "any"},
+        {"classname": "info_player_start", "placement": "center"},
+        {"classname": "light", "count": 3}
+      ],
+      "tags": ["high_value", "map_control"]
+    }
+  ],
+
+  "connections": [
+    {"from": "smelting", "to": "east_catwalk", "type": "stairs", "width": "normal"},
+    {"from": "smelting", "to": "west_catwalk", "type": "stairs", "width": "normal"},
+    {"from": "east_catwalk", "to": "maintenance_north", "type": "corridor", "width": "narrow"},
+    {"from": "west_catwalk", "to": "maintenance_south", "type": "corridor", "width": "narrow"},
+    {"from": "maintenance_north", "to": "maintenance_south", "type": "corridor", "width": "normal"},
+    {"from": "maintenance_north", "to": "smelting", "type": "drop", "bidirectional": false, "width": "wide", "intent": "One-way drop into the smelting floor"},
+    {"from": "armory", "to": "east_catwalk", "type": "corridor", "width": "normal"},
+    {"from": "armory", "to": "maintenance_south", "type": "stairs", "width": "narrow"}
+  ],
+
+  "flow": {
+    "primary_loop": ["smelting", "east_catwalk", "maintenance_north", "maintenance_south", "west_catwalk", "smelting"],
+    "secondary_loops": [
+      ["east_catwalk", "armory", "maintenance_south", "maintenance_north", "east_catwalk"]
+    ],
+    "choke_points": ["maintenance_north", "maintenance_south"],
+    "sightlines": [
+      {"from": "east_catwalk", "to": "smelting", "description": "Overlook down to the smelting floor and RL platform"},
+      {"from": "west_catwalk", "to": "smelting", "description": "Mirror sightline from the opposite side"}
+    ]
+  }
+}
