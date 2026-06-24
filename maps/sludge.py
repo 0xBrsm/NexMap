@@ -3,21 +3,33 @@
 import os
 from qgeo import MapWriter, box, prism, wedge, cylinder, arch, stairs
 
-# Runic metal palette (DM2 family per the id corpus: metal4_4 dominant,
-# met5_1/metal1_*/metal5_* secondary, rune accents, light3_8 panels).
-WALL = "metal4_4"
-WALL2 = "metal2_2"
-FLOOR = "metal1_3"
-CEIL = "metal1_4"
-TRIM = "metal5_1"
-BEAM = "metal1_4"
-PILLAR = "metal5_4"
-PITWALL = "metal1_3"
-PITFLOOR = "metal1_3"
-RIB = "rune2_1"
-LPANEL = "light3_8"
-SCONCE = "light1_4"
-SLIME = "*slime0"
+# Runic metal palette, retuned to dm2's actual texture mix (corpus): metal4_4
+# walls, metal2_2 cog-face panels, met5_1 ceilings, cop1_1 COPPER trim (the
+# warm accent the old palette lacked), rune2_5/rune1_7 rune panels, mmetal1_6
+# grime in the pit. Diversifying floor/ceiling/pit/beam off metal1_x kills the
+# monochrome look.
+WALL = "metal4_4"          # dm2 signature wall
+WALL2 = "metal2_2"         # cog-face secondary (corridor, teleporter)
+FLOOR = "metal1_3"         # walkway floor
+CEIL = "met5_1"            # distinct ceiling panel (was metal1_4)
+TRIM = "cop1_1"            # copper trim — warm accent (was metal5_1)
+BEAM = "metal5_1"          # ceiling beams get their own metal (was metal1_4)
+PILLAR = "metal5_4"        # arcade columns
+PITWALL = "mmetal1_6"      # grimy mottled pit wall (was metal1_3)
+PITFLOOR = "metal1_7"      # distinct pit floor under the slime (was metal1_3)
+RIB = "rune2_5"            # iconic dm2 rune panel (was rune2_1)
+RIB2 = "rune1_7"           # second rune accent
+COG = "metal2_2"           # cog-face accent panel
+LPANEL = "light3_8"        # cool glowing light panel
+SCONCE = "light1_4"        # warm industrial sconce
+SLIME = "*slime0"          # green slime (the Sludgeworks identity — kept)
+
+# Light colors (ericw _color, 0-255): warm forge sconces, cool industrial
+# panels, sickly slime glow, cold teleporter magic.
+WARM = "255 188 120"
+COOL = "176 200 255"
+SLIMEC = "120 255 95"
+TELEC = "150 180 255"
 
 m = MapWriter("The Sludgeworks", minlight=8)
 
@@ -53,12 +65,13 @@ m.add(box(48, -256, 0, 60, 256, 10, TRIM))
 for ly in (-160, 0, 160):
     m.add(box(-60, ly - 8, 10, -48, ly + 8, 22, LPANEL))
     m.add(box(48, ly - 8, 10, 60, ly + 8, 22, LPANEL))
-    m.light(0, ly, 40, 175, wait=1.1)
+    m.light(0, ly, 40, 180, wait=1.1, _color=COOL)
 m.add(cylinder(0, -128, 24, -160, -16, PITWALL, sides=8))
 m.add(cylinder(0, 128, 24, -160, -16, PITWALL, sides=8))
 
-# ---- megahealth island ----
-m.add(cylinder(232, 0, 40, -160, -88, "mmetal1_5", sides=12, cap_hi="plat_top2"))
+# ---- megahealth island (cog-face plinth, lit as a focal prize) ----
+m.add(cylinder(232, 0, 40, -160, -88, COG, sides=12, cap_hi="plat_top2"))
+m.light(232, 0, -72, 200, _color=SLIMEC)
 
 # ---- escape steps out of the slime (south pit wall) ----
 for i in range(1, 11):
@@ -91,16 +104,17 @@ for x in (-272, -16, 240):
 for fx, fy in ((-256, -160), (-256, 160), (0, 0), (0, -160), (0, 160),
                (256, -160), (256, 160)):
     m.add(box(fx - 12, fy - 12, 272, fx + 12, fy + 12, 288, LPANEL))
-    m.light(fx, fy, 256, 250, wait=0.9)
+    m.light(fx, fy, 256, 235, wait=0.95, _color=COOL)
 
-# ---- wall ribs above the ledges ----
-for x in (-416, -160, 96, 352):
-    m.add(box(x, 376, 192, x + 64, 384, 320, RIB))
-    m.add(box(x, -384, 192, x + 64, -376, 320, RIB))
-m.light(-256, 352, 248, 200)
-m.light(256, 352, 248, 200)
-m.light(-256, -352, 248, 200)
-m.light(256, -352, 248, 200)
+# ---- wall ribs above the ledges (alternating rune panels) ----
+for i, x in enumerate((-416, -160, 96, 352)):
+    rib = RIB if i % 2 == 0 else RIB2
+    m.add(box(x, 376, 192, x + 64, 384, 320, rib))
+    m.add(box(x, -384, 192, x + 64, -376, 320, rib))
+m.light(-256, 352, 248, 205, _color=WARM)
+m.light(256, 352, 248, 205, _color=WARM)
+m.light(-256, -352, 248, 205, _color=WARM)
+m.light(256, -352, 248, 205, _color=WARM)
 
 # ---- base skirts along the long walls ----
 m.add(prism([(368, 0), (384, 0), (384, 16)], "x", -512, 512, TRIM))
@@ -109,35 +123,35 @@ m.add(prism([(-384, 0), (-368, 0), (-384, 16)], "x", -512, 512, TRIM))
 # ---- sconces: west wall flanking the door ----
 m.add(box(-512, 224, 96, -496, 256, 160, SCONCE))
 m.add(box(-512, 0, 96, -496, 32, 160, SCONCE))
-m.light(-480, 240, 128, 250)
-m.light(-480, 16, 128, 250)
+m.light(-480, 240, 128, 255, _color=WARM, style="11")
+m.light(-480, 16, 128, 255, _color=WARM, style="11")
 
 # ---- sconces under the ledges (north/south walls) ----
 for sx in (-240, 144):
     m.add(box(sx, -384, 64, sx + 32, -368, 128, SCONCE))
     m.add(box(sx, 368, 64, sx + 32, 384, 128, SCONCE))
-m.light(-224, -360, 96, 250)
-m.light(160, -360, 96, 250)
-m.light(-224, 360, 96, 250)
-m.light(160, 360, 96, 250)
+m.light(-224, -360, 96, 255, _color=WARM)
+m.light(160, -360, 96, 255, _color=WARM)
+m.light(-224, 360, 96, 255, _color=WARM)
+m.light(160, 360, 96, 255, _color=WARM)
 
 # ---- stair lights ----
 m.add(box(496, 96, 224, 512, 128, 256, SCONCE))
 m.add(box(-512, -144, 224, -496, -112, 256, SCONCE))
-m.light(480, 112, 240, 280)
-m.light(-480, -128, 240, 280)
+m.light(480, 112, 240, 285, _color=WARM)
+m.light(-480, -128, 240, 285, _color=WARM)
 
-# ---- slime glow ----
+# ---- slime glow (sickly green, brighter for a hot pit) ----
 for gx in (-200, 0, 200):
     for gy in (-128, 128):
-        m.light(gx, gy, -72, 200, wait=0.7, _color="140 255 90")
+        m.light(gx, gy, -72, 230, wait=0.6, _color=SLIMEC)
 
 # ---- corridor (x -768..-512, y 64..192, z 0..128) ----
 m.add(box(-768, 48, -16, -512, 208, 0, FLOOR, zp=FLOOR))
 m.add(box(-768, 192, -16, -512, 208, 144, WALL2))
 m.add(box(-768, 48, -16, -512, 64, 144, WALL2))
 m.add(box(-768, 48, 128, -512, 208, 144, CEIL))
-m.light(-640, 128, 104, 220, style=10)
+m.light(-640, 128, 104, 215, style=10, _color=WARM)
 
 # ---- teleporter chamber (interior x -1024..-768, y 0..256, z 0..192) ----
 m.add(box(-1040, -16, -16, -768, 272, 0, FLOOR, zp=FLOOR))
@@ -155,11 +169,11 @@ m.add(box(-1024, 168, 0, -1000, 184, 152, PILLAR))
 m.add(arch("y", 88, 168, -1024, -1000, 104, 48, 176, PILLAR, segments=4))
 m.add(box(-1016, 88, 8, -1008, 168, 152, "*teleport"))
 m.add(box(-1008, 96, 0, -944, 160, 8, TRIM, zp="tele_top"))
-m.light(-976, 128, 160, 300)
-m.light(-800, 32, 160, 150)
+m.light(-976, 128, 160, 310, _color=TELEC)
+m.light(-800, 32, 160, 150, _color=TELEC)
 # chamber ceiling fixture
 m.add(box(-916, 116, 184, -892, 140, 192, LPANEL))
-m.light(-904, 128, 176, 250, wait=0.9)
+m.light(-904, 128, 176, 245, wait=0.9, _color=COOL)
 m.ent("trigger_teleport", brush=box(-1008, 88, 8, -944, 168, 136, "black"),
       target="tele1")
 
@@ -198,9 +212,9 @@ m.ent("ambient_drip", origin="150 180 -40")
 m.ent("ambient_swamp1", origin="250 -100 -60")
 m.ent("ambient_swamp2", origin="-250 100 -60")
 
-# ---- arcade fill lights ----
+# ---- arcade fill lights (dim warm, lets the slime glow read in contrast) ----
 for cx in (-256, 0, 256, 448, -448):
-    m.light(cx, 320, 100, 150, wait=1.2)
-    m.light(cx, -320, 100, 150, wait=1.2)
+    m.light(cx, 320, 100, 135, wait=1.3, _color=WARM)
+    m.light(cx, -320, 100, 135, wait=1.3, _color=WARM)
 
 m.write(os.path.join(os.path.dirname(__file__), "..", "out", "sludge.map"))
