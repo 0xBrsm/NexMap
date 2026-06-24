@@ -16,6 +16,7 @@ at z0, ceiling underside at z1; walls/floor/ceiling slabs are built outward by
 `wall` thickness. Faces are named xn/xp/yn/yp (the -x/+x/-y/+y walls).
 """
 import os
+import sys
 
 import qgeo
 import qprefab as P
@@ -292,6 +293,47 @@ class Layout:
         self.conns.append(c)
         return c
 
+    def ring(self, rooms, kind="corridor", **kw):
+        """Wire a list of rooms into a closed loop (each to the next, last back
+        to first). The single cheapest way to give a layout circuits instead of
+        a tree — place the rooms in a ring and call this."""
+        for i in range(len(rooms)):
+            self.connect(kind, rooms[i], rooms[(i + 1) % len(rooms)], **kw)
+
+    def flow_warnings(self):
+        """Topology warnings on the explicit room graph, at authoring time:
+        a tree (no loops) or dead-end rooms mean poor DM flow. Complements
+        qcheck's post-geometry walkable-graph flow gate."""
+        adj = {r.name: set() for r in self.rooms}
+        for c in self.conns:
+            adj[c.a.name].add(c.b.name)
+            adj[c.b.name].add(c.a.name)
+        n = len(self.rooms)
+        e = len({frozenset((c.a.name, c.b.name)) for c in self.conns})
+        seen, comps = set(), 0
+        for r in self.rooms:
+            if r.name in seen:
+                continue
+            comps += 1
+            stack = [r.name]
+            seen.add(r.name)
+            while stack:
+                for m in adj[stack.pop()]:
+                    if m not in seen:
+                        seen.add(m)
+                        stack.append(m)
+        loops = e - n + comps
+        warns = []
+        if n >= 3 and loops <= 0:
+            warns.append("room graph is a tree (0 loops) — add a connection "
+                         "that closes a loop (try Layout.ring) so players can "
+                         "run circuits instead of backtracking")
+        dead = sorted(name for name, a in adj.items() if len(a) <= 1)
+        if dead and n >= 3:
+            warns.append(f"dead-end rooms (one exit): {', '.join(dead)} — give "
+                         f"each >=2 connections")
+        return warns
+
     def _navcheck(self):
         adj = {r.name: set() for r in self.rooms}
         for c in self.conns:
@@ -319,6 +361,8 @@ class Layout:
 
     def build(self):
         self._navcheck()
+        for w in self.flow_warnings():
+            print(f"qlayout flow: {w}", file=sys.stderr)
         m = qgeo.MapWriter(self.message, **{k: v for k, v in self.props.items()
                                             if k in ("wad", "worldtype",
                                                      "minlight", "sounds")})
