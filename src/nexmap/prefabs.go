@@ -307,6 +307,80 @@ func RandomDetails(rng *rand.Rand, room *Room, hasPool bool) []Detail {
 	return picked
 }
 
+// ChunkAwareDetails selects details informed by whether the source map
+// has architectural features (recesses, pillars) in its wall geometry.
+func ChunkAwareDetails(rng *rand.Rand, room *Room, hasPool bool, sourceHasFeatures bool) []Detail {
+	if !sourceHasFeatures {
+		// Source map has flat walls — use structural details to add interest.
+		return RandomDetails(rng, room, hasPool)
+	}
+
+	// Source map already has wall features — favor complementary details
+	// like light recesses and trim rather than competing geometry.
+	var candidates []Detail
+	w, h := room.Width(), room.Height()
+
+	// Always consider these — they complement featured walls.
+	if w >= 192 && h >= 192 {
+		candidates = append(candidates, DetailLightRecesses)
+	}
+	if w >= 128 && h >= 128 {
+		candidates = append(candidates, DetailWallTrim)
+	}
+
+	// Only add floor-level details for large rooms.
+	if w >= 320 && h >= 320 && !hasPool {
+		candidates = append(candidates, DetailStepDown)
+		candidates = append(candidates, DetailPlatform)
+	}
+
+	// Pillars work well with featured walls — they're at corners, not on walls.
+	if w >= 384 && h >= 384 {
+		candidates = append(candidates, DetailPillars)
+	}
+
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	rng.Shuffle(len(candidates), func(i, j int) {
+		candidates[i], candidates[j] = candidates[j], candidates[i]
+	})
+
+	// Pick 1-2, respecting conflicts.
+	var picked []Detail
+	hasHeight := false
+	for _, d := range candidates {
+		if len(picked) >= 2 {
+			break
+		}
+		if (d == DetailPlatform || d == DetailStepDown) && hasHeight {
+			continue
+		}
+		if d == DetailPlatform || d == DetailStepDown {
+			hasHeight = true
+		}
+		if d == DetailPillars && hasHeight {
+			continue
+		}
+		picked = append(picked, d)
+	}
+	return picked
+}
+
+// chunkHasFeatures checks if a source map's walls have depth variation.
+func chunkHasFeatures(lib *MapChunkLibrary, mapName string) bool {
+	if lib == nil {
+		return false
+	}
+	for _, wc := range lib.Walls {
+		if wc.Source == mapName && (wc.HasRecess || wc.HasPillar) {
+			return true
+		}
+	}
+	return false
+}
+
 func rectsOverlap(ax0, ay0, ax1, ay1, bx0, by0, bx1, by1 int) bool {
 	return ax0 < bx1 && ax1 > bx0 && ay0 < by1 && ay1 > by0
 }

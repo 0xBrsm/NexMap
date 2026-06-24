@@ -22,6 +22,7 @@ func main() {
 	// Procgen options.
 	rooms := flag.Int("rooms", 3, "Max BSP subdivision depth (procgen mode)")
 	arenaSize := flag.Int("arena-size", 3072, "Arena side length in Quake units (procgen mode)")
+	remixMap := flag.String("remix", "", "Source map to remix (e.g. dm4)")
 
 	flag.Parse()
 
@@ -73,6 +74,21 @@ func main() {
 		m.Worldspawn.Properties["message"] = resolved.Name
 
 		th := GetTheme(resolved.Theme)
+
+		// If style references a source map, override the theme with its palette.
+		if resolved.Style != "" {
+			if lib, err := LoadChunkLibrary(); err == nil {
+				if ep, ok := lib.MapPalettes[resolved.Style]; ok {
+					pal := PaletteFromExtracted(ep)
+					fmt.Printf("style: %s (wall=%s floor=%s ceil=%s)\n", resolved.Style, pal.Wall, pal.Floor, pal.Ceiling)
+					// Override the default textures so all geometry uses this palette.
+					Textures.Floor = pal.Floor
+					Textures.Ceiling = pal.Ceiling
+					Textures.Shell = pal.Trim
+					Textures.Fill = pal.Wall
+				}
+			}
+		}
 		var roomEnvs []string
 		var roomDetails [][]Detail
 		for _, br := range resolved.Rooms {
@@ -96,6 +112,19 @@ func main() {
 
 		slug = strings.ReplaceAll(strings.ToLower(resolved.Name), " ", "_")
 		slug = strings.ReplaceAll(slug, "'", "")
+	} else if *remixMap != "" {
+		// Remix mode: stock map + bolted-on room.
+		fmt.Printf("seed=%d  remix=%s\n", s, *remixMap)
+
+		mapSourceDir := filepath.Join(os.Getenv("HOME"), "code", "quake_map_source")
+		var err error
+		m, err = RemixPOC(mapSourceDir, *remixMap, rng)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+
+		slug = fmt.Sprintf("remix_%s_%d", *remixMap, s)
 	} else {
 		// Procgen mode.
 		fmt.Printf("seed=%d  arena=%d  depth=%d\n", s, *arenaSize, *rooms)
