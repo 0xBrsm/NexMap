@@ -19,6 +19,8 @@ func main() {
 		buildCmd(os.Args[2:])
 	case "render":
 		renderCmd(os.Args[2:])
+	case "navcheck":
+		navcheckCmd(os.Args[2:])
 	default:
 		usage()
 	}
@@ -30,6 +32,8 @@ func usage() {
       run map script -> qbsp/vis/light -> render screenshots [-> deploy to Pi]
   nexmap render <file.bsp> [-cams ...] [-size WxH] [-gamma G]
       render screenshots of an existing BSP
+  nexmap navcheck <file.bsp> [-bin path] [-dump]
+      build a navmesh and report walkable coverage + spawn/item reachability
 `)
 	os.Exit(2)
 }

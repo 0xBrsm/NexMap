@@ -5,3 +5,4 @@ examples/shareware/bsp/
 __pycache__/
 out/
 *.log
+tools/navcheck/build/
