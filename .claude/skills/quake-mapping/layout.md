@@ -72,3 +72,28 @@ Rules: `door`/`arch` are for **adjacent** rooms (walls ~touching); `corridor`
 for **separated** rooms (it builds the connecting tube). Connections punch both
 walls automatically. Every room needs a connection path from the spawn room or
 the build raises before it ever reaches qbsp.
+
+## Flow: build loops, not trees
+
+Connectivity is not flow. A *tree* of rooms (hub with spurs, or a linear A-B-C)
+is connected but plays terribly — you backtrack and get cornered in dead ends.
+id DM maps are **loopy**: you can run circuits. Measured bands (qtheme.FLOW_BANDS,
+from tools/qflow.py over the 38 id maps): loop density >= 0.5 (median ~1.0),
+dead-end ratio <= 0.19. The unplayable Well v1 scored 0.24 / 0.77; the rebuild
+hits 0.61 / 0.015.
+
+How to get loops:
+- `Layout.ring([a, b, c, d])` wires rooms into a closed cycle — the cheapest
+  loop. `qlayout` warns at build time if the room graph is a tree or has
+  dead-end rooms.
+- Give every room **>= 2 connections**. A single-entrance room is a spur.
+- Within one big arena, the loops live in the *walkable geometry*: a
+  **continuous** perimeter walkway (not four disconnected ledges), **bridges**
+  across a central pit, and **multiple stairs** between tiers. Each extra link
+  between two rings adds a circuit.
+- Keep stairs generous (run >= 16, ideally 24) — steep run-8 steps don't even
+  register as walkable area and play cramped.
+
+The render can't show flow. After building, read qcheck's flow lines (or run
+`python3 tools/qflow.py out/foo.map`) and fix any tree-like / dead-end / flat
+warning before deploy.

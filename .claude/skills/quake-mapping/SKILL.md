@@ -33,7 +33,12 @@ failures. The stack exists so each failure mode is fixed once, in code:
 - `tools/qcheck.py` — deterministic validator wired into `nexmap build`. It
   runs before qbsp and **hard-fails the build** on floating/embedded/colliding
   entities; it warns on missing landings, unreachable items, thin wall margins,
-  low headroom, sparse/flat lighting, and off-palette textures.
+  low headroom, sparse/flat lighting, off-palette textures, and **poor flow**.
+- `tools/qflow.py` — topology analysis of the walkable nav graph (loops,
+  dead ends, coverage, elevation, sightlines). The same metrics qcheck's flow
+  warnings use; run `python3 tools/qflow.py corpus` to see the id bands or
+  `qflow out/foo.map` to grade one map. Flow is *movement* quality — the thing
+  renders can't show.
 
 ## The mandatory loop
 
@@ -46,7 +51,14 @@ failures. The stack exists so each failure mode is fixed once, in code:
    rubric below. Iterate until it passes. Never deploy a map you haven't
    looked at, and never ship while any rubric point is failing.
 
-## Ship rubric (all six must pass before deploy)
+## Ship rubric (all seven must pass before deploy)
+
+0. **Flow** — the layout is loopy, not a tree. qcheck's flow check must be
+   clean: no "tree-like", "dead-end-heavy", or "flat" warning. Target the id
+   bands (qtheme.FLOW_BANDS): loop density >= 0.5 (median ~1.0), dead-end ratio
+   <= 0.19, several elevation levels. Continuous ring walkways, bridges, and
+   multiple stairs between tiers make loops; spurs and single-entrance rooms
+   make dead ends. A beautiful map that plays as a tree still fails.
 
 1. **Mood lighting** — light *pools and falls off*; visible sources motivate
    every bright patch; no flat wash, no `_minlight` > 30. Dark families
