@@ -259,6 +259,51 @@ static bool ends_with(const char *s, const char *suf)
 	return ls >= lf && strcmp(s + ls - lf, suf) == 0;
 }
 
+// Dump the true walk graph as JSON: poly centroids + areas, base mesh
+// adjacency, and off-mesh connection edges (jumps/drops/teleporters/etc).
+// Consumed by tools/flowstruct.py to read macro flow structure.
+static void emit_flow_graph(nav_mesh_runtime_t *nav, nav_mesh_poly_record_t *recs, int rc)
+{
+	auto nearest = [&](float x, float y, float z) -> int {
+		int best = -1; float bd = 1e30f;
+		for (int i = 0; i < rc; i++) {
+			float dx = recs[i].center[0]-x, dy = recs[i].center[1]-y, dz = recs[i].center[2]-z;
+			float d = dx*dx + dy*dy + dz*dz;
+			if (d < bd) { bd = d; best = i; }
+		}
+		return best;
+	};
+	printf("{\n  \"polys\": [");
+	for (int i = 0; i < rc; i++)
+		printf("%s[%.1f,%.1f,%.1f,%.0f]", i?",":"",
+			recs[i].center[0], recs[i].center[1], recs[i].center[2], poly_area(recs[i]));
+	printf("],\n  \"base_edges\": [");
+	std::unordered_map<unsigned long long,int> r2i;
+	for (int i = 0; i < rc; i++) r2i[recs[i].poly_ref] = i;
+	bool first = true;
+	for (int i = 0; i < rc; i++)
+		for (int k = 0; k < recs[i].neighbor_count; k++) {
+			auto it = r2i.find(recs[i].neighbor_refs[k]);
+			if (it == r2i.end() || it->second <= i) continue;
+			printf("%s[%d,%d]", first?"":",", i, it->second); first = false;
+		}
+	printf("],\n  \"offmesh_edges\": [");
+	const dtNavMesh *nm = nav->navmesh;
+	first = true;
+	for (int t = 0; t < nm->getMaxTiles(); t++) {
+		const dtMeshTile *tile = nm->getTile(t);
+		if (!tile || !tile->header) continue;
+		for (int j = 0; j < tile->header->offMeshConCount; j++) {
+			const dtOffMeshConnection *con = &tile->offMeshCons[j];
+			// con->pos is Recast (x,z,y); convert to Quake (x,y,z).
+			int a = nearest(con->pos[0], con->pos[2], con->pos[1]);
+			int b = nearest(con->pos[3], con->pos[5], con->pos[4]);
+			if (a >= 0 && b >= 0 && a != b) { printf("%s[%d,%d]", first?"":",", a, b); first = false; }
+		}
+	}
+	printf("]\n}\n");
+}
+
 int main(int argc, char **argv)
 {
 	std::vector<float> verts;
@@ -267,6 +312,8 @@ int main(int argc, char **argv)
 	std::vector<nav_off_mesh_link_t> links;
 	char err[256] = {0};
 	model_t *world = nullptr; // non-null => BSP mode (link callback active)
+	bool flow_mode = false;
+	for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "-flow")) flow_mode = true;
 
 	if (argc > 1 && ends_with(argv[1], ".bsp")) {
 		world = load_bsp_scene(argv[1], verts, tris, points, links, err, sizeof(err));
@@ -334,6 +381,14 @@ int main(int argc, char **argv)
 	nav_mesh_poly_record_t *recs = nullptr;
 	int rec_count = 0;
 	nav_mesh_collect_polys(nav, &recs, &rec_count, err, sizeof(err));
+
+	if (flow_mode) {
+		emit_flow_graph(nav, recs, rec_count);
+		nav_mesh_free_poly_records(recs);
+		nav_mesh_destroy(nav);
+		return 0;
+	}
+
 	std::unordered_map<unsigned long long, int> ref2island;
 	std::vector<int> island_polys;
 	int num_islands = label_islands(recs, rec_count, ref2island, island_polys);
