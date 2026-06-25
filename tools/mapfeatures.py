@@ -36,8 +36,40 @@ def features(bsp):
         "zband": f["zbands"],
     }
 
+# SP good-region gate, derived from the 97-map exemplar corpus (base Quake +
+# DOPA + SoA + DoE + udob + AD, median-scale). Each entry: (bad_direction,
+# threshold, median_target). A map is flagged when it crosses the threshold in
+# the "bad" direction. These are AUTHORING TARGETS, not hard limits — aim for
+# the median; a WARN means out of the range every shipped id-quality map sits in.
+SP_GATE = {
+    "areas":    ("low",  125,  245),   # below = too small / under-differentiated
+    "visDens":  ("high", 0.23, 0.05),  # above = over-exposed blob (no occlusion)
+    "bcGini":   ("low",  0.68, 0.74),  # below = no real chokepoints (flat betweenness)
+    "zband":    ("low",  7,    11),    # below = too flat (no vertical layering)
+    "sightCV":  ("low",  0.47, 0.54),  # below = uniform sightlines (no intimate/vista mix)
+}
+
+def gate(bsp):
+    r = features(bsp)
+    name = os.path.basename(bsp).replace(".bsp", "")
+    print(f"feature gate: {name}")
+    passes = 0
+    for k, (bad, thr, tgt) in SP_GATE.items():
+        v = r[k]
+        ok = (v >= thr) if bad == "low" else (v <= thr)
+        passes += ok
+        arrow = "" if ok else (" TOO LOW"  if bad == "low" else " TOO HIGH")
+        print(f"  {'OK ' if ok else 'WARN'} {k:<9} {v:>8}  (target ~{tgt}, band {'>=' if bad=='low' else '<='}{thr}){arrow}")
+    verdict = "IN BAND" if passes == len(SP_GATE) else f"{passes}/{len(SP_GATE)} in band"
+    print(f"  => {verdict}")
+    return passes == len(SP_GATE)
+
 def main():
     args = sys.argv[1:]
+    if "--gate" in args:
+        bsps = [a for a in args if not a.startswith("--")]
+        allok = all(gate(b) for b in bsps)
+        sys.exit(0 if allok else 1)
     summary = "--summary" in args
     bsps = [a for a in args if a != "--summary"]
     rows = {}

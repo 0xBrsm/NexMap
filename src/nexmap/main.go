@@ -99,6 +99,16 @@ func buildCmd(args []string) {
 		fatal(err)
 	}
 
+	// 4b. Feature gate (guidance, not fatal): score the compiled map's
+	// navmesh-derived structure against the id-corpus SP good-region.
+	mf := filepath.Join(filepath.Dir(filepath.Dir(script)), "tools", "mapfeatures.py")
+	if _, statErr := os.Stat(mf); statErr == nil {
+		fg := exec.Command("python3", mf, "--gate", bspPath)
+		fg.Stdout = os.Stdout
+		fg.Stderr = os.Stderr
+		_ = fg.Run() // out-of-band features are warnings, not build failures
+	}
+
 	// 5. Render screenshots.
 	var sw, sh int
 	if _, err := fmt.Sscanf(*shotSize, "%dx%d", &sw, &sh); err != nil {

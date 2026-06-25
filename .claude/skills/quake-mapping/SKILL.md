@@ -53,12 +53,13 @@ failures. The stack exists so each failure mode is fixed once, in code:
 
 ## Ship rubric (all seven must pass before deploy)
 
-0. **Flow** — the layout is loopy, not a tree. qcheck's flow check must be
-   clean: no "tree-like", "dead-end-heavy", or "flat" warning. Target the id
-   bands (qtheme.FLOW_BANDS): loop density >= 0.5 (median ~1.0), dead-end ratio
-   <= 0.19, several elevation levels. Continuous ring walkways, bridges, and
-   multiple stairs between tiers make loops; spurs and single-entrance rooms
-   make dead ends. A beautiful map that plays as a tree still fails.
+0. **Flow & structure** — the `nexmap build` feature gate is IN BAND on all
+   five targets (see "Structural targets" below): occlusion, scale,
+   chokepoints, verticality, sightline variety. These supersede raw loop
+   density (a misleading descriptor — it rates over-connected blobs highest).
+   Continuous ring walkways, bridges, and multiple stairs between tiers make
+   real flow; spurs and single-entrance rooms make dead ends. A beautiful map
+   that plays as a tree — or as an over-exposed blob — still fails.
 
 1. **Mood lighting** — light *pools and falls off*; visible sources motivate
    every bright patch; no flat wash, no `_minlight` > 30. Dark families
@@ -73,6 +74,28 @@ failures. The stack exists so each failure mode is fixed once, in code:
    floor or a pedestal; qcheck item/spacing checks pass clean.
 6. **Mystery/atmosphere** — at least one concealed, teased, or vertically
    revealed space; not every area visible from spawn.
+
+## Structural targets (the feature gate)
+
+`nexmap build` runs a feature gate after compile (`tools/mapfeatures.py --gate`)
+that scores the map's navmesh-derived structure against the SP good-region
+measured from 97 exemplar maps (base Quake + DOPA + Scourge of Armagon +
+Dissolution of Eternity + udob + AD). Aim for the median; a WARN means you're
+outside the range *every* shipped id-quality map sits in. The five that matter
+(each a distinct failure mode our early maps hit):
+
+| target | band (p10–p90) | median | failure if outside |
+|---|---|---|---|
+| **occlusion** (vis_density) | 0.03–0.23 | 0.05 | too high = over-exposed blob, no mystery |
+| **scale** (areas) | 125–395 | 245 | too low = small / under-differentiated |
+| **chokepoints** (bc_gini) | 0.68–0.80 | 0.74 | too low = flat, no real funnels |
+| **verticality** (zband) | 7–17 | 11 | too low = flat, no layering |
+| **sightline variety** (sight_cv) | 0.47–0.64 | 0.54 | too low = uniform, no intimate/vista mix |
+
+**Author toward these, don't debug into them.** Occlusion is the dominant one:
+break sightlines, layer space vertically, hide areas. NOTE: raw *loop density*
+is NOT a quality target — it's a descriptor that mis-rates blobs as good (our
+worst map topped it). Trust the gate's five features over loop counts.
 
 ## Core invariants (from the id corpus)
 
