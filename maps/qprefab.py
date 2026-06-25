@@ -343,3 +343,70 @@ def ceiling_vault(x1, y1, x2, y2, z_spring, theme, rise=None, axis="x",
         pf.add(qgeo.arch("y", y1, y2, x1, x2, z_spring, rise,
                          z_spring + rise + 8, th["ceiling"], segments=segments))
     return pf
+
+
+# --------------------------------------------------------------- occlusion
+
+def sightline_baffle(x1, y1, x2, y2, z_base, theme, height=None, trim=True):
+    """A free-standing partial wall that BREAKS LINE OF SIGHT and splits a space
+    into sub-areas — the main tool for occlusion (vis_density) and for making a
+    route bend around something (a soft chokepoint). It does NOT seal the space:
+    place it so players path around it. Footprint is the rect (x1,y1)-(x2,y2)
+    (one dim is the thickness); rises from z_base by `height` (default 96 — well
+    over eye height 22+56 so it actually blocks sightlines, not just knees).
+
+    This is occlusion as ADDED GEOMETRY; you can equally get it by laying out
+    rooms that don't see each other in the first place. A baffle is the patch
+    when an existing space is too open."""
+    th = THEMES[theme]
+    h = height if height is not None else 96
+    pf = Prefab()
+    pf.add(qgeo.box(x1, y1, z_base, x2, y2, z_base + h, th["wall"]))
+    if trim:
+        pf.add(qgeo.box(x1, y1, z_base + h, x2, y2, z_base + h + 4, th["trim"]))
+    return pf
+
+
+# --------------------------------------------------------------- catalog
+#
+# Each part is tagged with the gate features it tends to ADVANCE, so authoring
+# can be driven by "which target am I short on?" rather than by a fixed recipe.
+# This is guidance, not a constraint: parts are parametric, compose freely, and
+# nothing here is mandatory — drop to qgeo for any shape the catalog lacks
+# (means stay soft; only the feature gate's outcomes are hard). Feature keys
+# match tools/mapfeatures.py: occlusion, scale, chokepoint, verticality,
+# sightline_variety; plus non-gate concerns lighting/detail/items.
+CATALOG = {
+    "sightline_baffle": (["occlusion", "chokepoint"],
+        "partial wall that breaks LOS and bends the route"),
+    "curved_wall":      (["occlusion", "detail"],
+        "swept wall: breaks sightlines and 90-degree edges"),
+    "pillar":           (["occlusion", "detail"],
+        "column; cluster them to break a big open volume"),
+    "window_embrasure": (["sightline_variety", "occlusion"],
+        "controlled long view through an otherwise blocking wall"),
+    "walkway":          (["verticality", "chokepoint"],
+        "elevated path / bridge across a space"),
+    "stairs_landed":    (["verticality"],
+        "tier-to-tier link with guaranteed landings"),
+    "ceiling_vault":    (["verticality", "detail"],
+        "varies headroom; kills the box-with-a-lid look"),
+    "archway":          (["chokepoint", "detail"],
+        "frames and narrows a passage between areas"),
+    "teleporter_pad":   (["chokepoint"],
+        "non-adjacent link between areas (off-mesh)"),
+    "chamfered_corner": (["detail"], "breaks a hard corner"),
+    "wainscot":         (["detail"], "wall banding; pure detail"),
+    "item_pedestal":    (["items"], "seats a pickup at the right height"),
+    "light_fixture":    (["lighting"], "visible source paired with its light"),
+}
+
+
+def catalog(feature=None):
+    """List catalog parts, optionally just those that feed `feature`.
+    e.g. catalog("occlusion") -> [(name, note), ...]. For authoring, not build."""
+    items = []
+    for name, (feeds, note) in CATALOG.items():
+        if feature is None or feature in feeds:
+            items.append((name, note))
+    return items

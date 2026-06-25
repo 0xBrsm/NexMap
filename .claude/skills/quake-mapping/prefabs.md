@@ -20,6 +20,17 @@ of freehanding the geometry.
 | `window_embrasure` | `(axis,a1,a2,wall_lo,wall_hi,z_sill,z_head,theme,liquid_glow=False)` | dead walls: recessed window, optional backlight |
 | `walkway` | `(x1,y1,x2,y2,z,theme,railing=True)` | flat play: elevated catwalk with curb rails |
 | `teleporter_pad` | `(x,y,z_floor,theme,target,dest_name,dest_origin)` | bare triggers: marked `*teleport` pad + linked destination |
+| `sightline_baffle` | `(x1,y1,x2,y2,z_base,theme,height=96)` | over-exposed space: free-standing partial wall that breaks LOS + bends the route |
+
+## Selecting by feature target
+
+Parts are tagged with the gate features they advance (`qprefab.CATALOG`). When a
+target is short, query the catalog instead of guessing:
+`qprefab.catalog("occlusion")`, `catalog("verticality")`, `catalog("chokepoint")`,
+`catalog("sightline_variety")`. The catalog is a vocabulary to compose freely —
+parametric parts you place, not a fixed kit — and `qgeo` is always there for
+shapes it lacks. Outcomes (the five gate features) are the only hard constraint;
+the forms are yours.
 
 ## Notes
 

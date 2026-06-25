@@ -97,6 +97,17 @@ break sightlines, layer space vertically, hide areas. NOTE: raw *loop density*
 is NOT a quality target — it's a descriptor that mis-rates blobs as good (our
 worst map topped it). Trust the gate's five features over loop counts.
 
+**Selecting parts by target.** `qprefab` is a feature-tagged catalog: when a
+target is short, pull the parts that feed it — `qprefab.catalog("occlusion")`,
+`catalog("verticality")`, `catalog("chokepoint")`, etc. (occlusion →
+`sightline_baffle`, `curved_wall`, `pillar`, `window_embrasure`; verticality →
+`walkway`, `stairs_landed`, `ceiling_vault`). This is a *vocabulary to compose
+freely*, not a kit to slot together — parts are parametric, you place them, and
+you drop to `qgeo` for any shape the catalog lacks. The targets (outcomes) are
+hard; how you hit them (the forms) stays yours. Best is a layout that's
+occluded/layered/funneled *by design* — baffles etc. are the patch for a space
+that came out too open, not the primary tool.
+
 ## Core invariants (from the id corpus)
 
 All numbers below were measured from the 38 original id .map sources.
