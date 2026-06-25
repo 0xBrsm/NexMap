@@ -47,7 +47,16 @@ model_t *qworld_load(const char *bsp_path, char *err, int errsz)
 	if (fread(data, 1, sz, f) != (size_t)sz) { fclose(f); free(data); snprintf(err, errsz, "short read"); return nullptr; }
 	fclose(f);
 
-	if (rd_i32(data) != 29) { free(data); snprintf(err, errsz, "unsupported BSP version"); return nullptr; }
+	// BSP29 (version int 29) and BSP2 (magic "BSP2") share the lump layout;
+	// BSP2 widens node/leaf/clipnode children to int32 + float bboxes.
+	unsigned magic = (unsigned)rd_i32(data);
+	bool bsp2 = (magic == 0x32505342u); // 'B','S','P','2'
+	if (!bsp2 && magic != 29) { free(data); snprintf(err, errsz, "unsupported BSP magic %u", magic); return nullptr; }
+	const int clip_stride = bsp2 ? 12 : 8;
+	const int node_stride = bsp2 ? 44 : 24;
+	const int leaf_stride = bsp2 ? 44 : 28;
+	const int child_w = bsp2 ? 4 : 2;
+	auto child = [&](const unsigned char *p) -> int { return bsp2 ? rd_i32(p) : (int)rd_i16(p); };
 	auto lump = [&](int i) -> Buf {
 		return Buf{ data + rd_i32(data + 4 + i * 8), rd_i32(data + 8 + i * 8) };
 	};
@@ -63,31 +72,31 @@ model_t *qworld_load(const char *bsp_path, char *err, int errsz)
 		g_planes[i].type = rd_i32(in + 16);
 	}
 
-	// Clipnodes (hulls 1/2).
+	// Clipnodes (hulls 1/2): planenum:int + children[2] (int16 BSP29 / int32 BSP2).
 	Buf lc = lump(LUMP_CLIPNODES);
-	int nclip = lc.len / 8;
+	int nclip = lc.len / clip_stride;
 	g_clipnodes = (dclipnode_t *)calloc(nclip > 0 ? nclip : 1, sizeof(dclipnode_t));
 	for (int i = 0; i < nclip; i++) {
-		const unsigned char *in = lc.p + i * 8;
+		const unsigned char *in = lc.p + i * clip_stride;
 		g_clipnodes[i].planenum = rd_i32(in);
-		g_clipnodes[i].children[0] = rd_i16(in + 4);
-		g_clipnodes[i].children[1] = rd_i16(in + 6);
+		g_clipnodes[i].children[0] = child(in + 4);
+		g_clipnodes[i].children[1] = child(in + 4 + child_w);
 	}
 
-	// Nodes + leafs -> hull 0.
-	Buf ll = lump(LUMP_LEAFS); int nleafs = ll.len / 28;
-	Buf ln = lump(LUMP_NODES); int nnodes = ln.len / 24;
+	// Nodes + leafs -> hull 0. leaf.contents is int32 at offset 0 in both formats.
+	Buf ll = lump(LUMP_LEAFS); int nleafs = ll.len / leaf_stride;
+	Buf ln = lump(LUMP_NODES); int nnodes = ln.len / node_stride;
 	g_hull0nodes = (dclipnode_t *)calloc(nnodes > 0 ? nnodes : 1, sizeof(dclipnode_t));
 	for (int i = 0; i < nnodes; i++) {
-		const unsigned char *in = ln.p + i * 24;
+		const unsigned char *in = ln.p + i * node_stride;
 		g_hull0nodes[i].planenum = rd_i32(in);
 		for (int j = 0; j < 2; j++) {
-			short c = rd_i16(in + 4 + j * 2);
+			int c = child(in + 4 + j * child_w);
 			if (c >= 0) g_hull0nodes[i].children[j] = c;
 			else {
 				int leafnum = -1 - c;
 				g_hull0nodes[i].children[j] = (leafnum >= 0 && leafnum < nleafs)
-					? rd_i32(ll.p + leafnum * 28) : CONTENTS_SOLID;
+					? rd_i32(ll.p + leafnum * leaf_stride) : CONTENTS_SOLID;
 			}
 		}
 	}
