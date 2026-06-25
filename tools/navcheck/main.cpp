@@ -304,6 +304,55 @@ static void emit_flow_graph(nav_mesh_runtime_t *nav, nav_mesh_poly_record_t *rec
 	printf("]\n}\n");
 }
 
+// Dump the area visibility graph (space-syntax VGA input): cluster polys into
+// room-scale areas, then test mutual line-of-sight between area centers via the
+// hull-0 tracer (eye height). Consumed by tools/vga.py for integration /
+// intelligibility. Requires the world tracer to be active.
+static void emit_vga_graph(nav_mesh_poly_record_t *recs, int rc)
+{
+	const float CELL = 256.0f, ZCELL = 128.0f, EYE = 40.0f;
+	std::unordered_map<long long, int> cell2area;
+	std::vector<double> ax, ay, az, aarea;
+	std::vector<int> acount;
+	auto key = [&](int i) -> long long {
+		long long cx = (long long)llround(recs[i].center[0] / CELL);
+		long long cy = (long long)llround(recs[i].center[1] / CELL);
+		long long cz = (long long)llround(recs[i].center[2] / ZCELL);
+		return ((cx & 0x1FFFFF) << 42) | ((cy & 0x1FFFFF) << 21) | (cz & 0x1FFFFF);
+	};
+	for (int i = 0; i < rc; i++) {
+		long long k = key(i);
+		auto it = cell2area.find(k);
+		int a;
+		if (it == cell2area.end()) {
+			a = (int)ax.size(); cell2area[k] = a;
+			ax.push_back(0); ay.push_back(0); az.push_back(0); aarea.push_back(0); acount.push_back(0);
+		} else a = it->second;
+		ax[a] += recs[i].center[0]; ay[a] += recs[i].center[1]; az[a] += recs[i].center[2];
+		aarea[a] += poly_area(recs[i]); acount[a]++;
+	}
+	int A = (int)ax.size();
+	for (int a = 0; a < A; a++) { ax[a] /= acount[a]; ay[a] /= acount[a]; az[a] /= acount[a]; }
+
+	printf("{\n  \"areas\": [");
+	for (int a = 0; a < A; a++)
+		printf("%s[%.1f,%.1f,%.1f,%.0f]", a?",":"", ax[a], ay[a], az[a], aarea[a]);
+	printf("],\n  \"vis_edges\": [");
+	bool first = true;
+	vec3_t zero = {0,0,0};
+	for (int a = 0; a < A; a++) {
+		vec3_t ea = {(float)ax[a], (float)ay[a], (float)az[a] + EYE};
+		for (int b = a + 1; b < A; b++) {
+			vec3_t eb = {(float)ax[b], (float)ay[b], (float)az[b] + EYE};
+			trace_t tr = SV_Move(ea, zero, zero, eb, MOVE_NOMONSTERS, nullptr);
+			if (tr.fraction >= 0.99f && !tr.startsolid) {
+				printf("%s[%d,%d]", first?"":",", a, b); first = false;
+			}
+		}
+	}
+	printf("]\n}\n");
+}
+
 int main(int argc, char **argv)
 {
 	std::vector<float> verts;
@@ -312,8 +361,11 @@ int main(int argc, char **argv)
 	std::vector<nav_off_mesh_link_t> links;
 	char err[256] = {0};
 	model_t *world = nullptr; // non-null => BSP mode (link callback active)
-	bool flow_mode = false;
-	for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "-flow")) flow_mode = true;
+	bool flow_mode = false, vga_mode = false;
+	for (int i = 1; i < argc; i++) {
+		if (!strcmp(argv[i], "-flow")) flow_mode = true;
+		if (!strcmp(argv[i], "-vga")) vga_mode = true;
+	}
 
 	if (argc > 1 && ends_with(argv[1], ".bsp")) {
 		world = load_bsp_scene(argv[1], verts, tris, points, links, err, sizeof(err));
@@ -369,7 +421,8 @@ int main(int argc, char **argv)
 			if (n > 0) { append_links(extra, n); nav_mesh_destroy(nav); nav = build(); }
 			free(extra);
 		}
-		qents_free(); qworld_free(world); qworld_set_active(nullptr); world = nullptr;
+		// VGA needs the tracer (line-of-sight via hull 0) — keep world alive.
+		if (!vga_mode) { qents_free(); qworld_free(world); qworld_set_active(nullptr); world = nullptr; }
 	}
 
 	if (!nav) {
@@ -381,6 +434,14 @@ int main(int argc, char **argv)
 	nav_mesh_poly_record_t *recs = nullptr;
 	int rec_count = 0;
 	nav_mesh_collect_polys(nav, &recs, &rec_count, err, sizeof(err));
+
+	if (vga_mode) {
+		emit_vga_graph(recs, rec_count);
+		if (world) { qents_free(); qworld_free(world); qworld_set_active(nullptr); }
+		nav_mesh_free_poly_records(recs);
+		nav_mesh_destroy(nav);
+		return 0;
+	}
 
 	if (flow_mode) {
 		emit_flow_graph(nav, recs, rec_count);
