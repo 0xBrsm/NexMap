@@ -53,25 +53,45 @@ def vga(bsp):
         cov = sum((a-mx)*(b-my) for a, b in zip(x, y))
         return cov / math.sqrt(sx*sy)
 
+    # Sightline lengths: euclidean length of each line-of-sight edge.
+    slen = []
+    for a, b in edges:
+        dx = areas[a][0]-areas[b][0]; dy = areas[a][1]-areas[b][1]; dz = areas[a][2]-areas[b][2]
+        slen.append(math.sqrt(dx*dx + dy*dy + dz*dz))
+    slen.sort()
+    def pct(p):
+        if not slen: return 0.0
+        return slen[min(len(slen)-1, int(p*len(slen)))]
+    med = pct(0.5)
+    # variety = coefficient of variation (spread relative to median); good maps
+    # mix short rooms with occasional long vistas, not one uniform scale.
+    mean_s = sum(slen)/len(slen) if slen else 0
+    var = sum((s-mean_s)**2 for s in slen)/len(slen) if slen else 0
+    cv = round(math.sqrt(var)/mean_s, 2) if mean_s else 0
+
     possible = N*(N-1)/2 if N > 1 else 1
     return dict(
         areas=N,
         vis_density=round(len(edges)/possible, 3),       # blob detector (high = blob)
         mean_conn=round(sum(conn)/N, 1) if N else 0,
         mean_integ=round(sum(integ)/N, 2) if N else 0,
-        intelligibility=round(pearson(conn, integ), 2),   # high = legible
+        intelligibility=round(pearson(conn, integ), 2),   # high = legible (but blobs score high too)
+        sight_med=round(med, 0),                          # typical sightline length
+        sight_max=round(pct(0.99), 0),                    # longest vista
+        sight_cv=cv,                                       # sightline variety (spread/mean)
     )
 
 def main():
-    print(f"{'map':<10} {'areas':>5} {'visDens':>7} {'meanConn':>8} {'integ':>6} {'intellig':>8}")
+    print(f"{'map':<11} {'areas':>5} {'visDens':>7} {'intellig':>8} "
+          f"{'sightMed':>8} {'sightMax':>8} {'sightCV':>7}")
     for bsp in sys.argv[1:]:
         name = os.path.basename(bsp).replace(".bsp", "")
         try:
             r = vga(bsp)
         except Exception as e:
-            print(f"{name:<10} ERROR {e}"); continue
-        print(f"{name:<10} {r['areas']:>5} {r['vis_density']:>7} {r['mean_conn']:>8} "
-              f"{r['mean_integ']:>6} {r['intelligibility']:>8}")
+            print(f"{name:<11} ERROR {e}"); continue
+        print(f"{name:<11} {r['areas']:>5} {r['vis_density']:>7} {r['intelligibility']:>8} "
+              f"{r['sight_med']:>8} {r['sight_max']:>8} {r['sight_cv']:>7}")
 
 if __name__ == "__main__":
     main()

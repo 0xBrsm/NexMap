@@ -68,10 +68,40 @@ def analyze(g, cell, zcell):
     deg = [len(adj[n]) for n in range(V)]
     hubs = sum(1 for d in deg if d >= 4)
     zbands = len({round(sum(zs)/len(zs) / 96) for zs in cell_z.values()})
+    bc = betweenness(adj, V)            # chokepoint structure
     return dict(areas=V, edges=E, comps=C, loops=L,
                 loop_density=round(L / V, 2) if V else 0,
                 hubs=hubs, max_deg=max(deg) if deg else 0,
-                vlinks=vlinks, zbands=zbands)
+                vlinks=vlinks, zbands=zbands,
+                bc_max=round(max(bc), 3) if bc else 0,   # strongest chokepoint
+                bc_gini=round(gini(bc), 2))              # concentration: high=few real chokes, low=blob
+
+def betweenness(adj, V):
+    """Brandes betweenness centrality on the area walk graph, normalized."""
+    from collections import deque
+    bc = [0.0] * V
+    for s in range(V):
+        S = []; P = [[] for _ in range(V)]; sigma = [0]*V; sigma[s] = 1
+        d = [-1]*V; d[s] = 0; Q = deque([s])
+        while Q:
+            v = Q.popleft(); S.append(v)
+            for w in adj[v]:
+                if d[w] < 0: d[w] = d[v] + 1; Q.append(w)
+                if d[w] == d[v] + 1: sigma[w] += sigma[v]; P[w].append(v)
+        delta = [0.0]*V
+        while S:
+            w = S.pop()
+            for v in P[w]:
+                delta[v] += (sigma[v]/sigma[w]) * (1 + delta[w])
+            if w != s: bc[w] += delta[w]
+    norm = (V-1)*(V-2)/2 if V > 2 else 1   # undirected normalization
+    return [b/2/norm for b in bc]
+
+def gini(x):
+    xs = sorted(x); n = len(xs); s = sum(xs)
+    if n == 0 or s == 0: return 0.0
+    cum = sum((i+1)*v for i, v in enumerate(xs))
+    return round(2*cum/(n*s) - (n+1)/n, 4)
 
 def main():
     ap = argparse.ArgumentParser()
@@ -79,16 +109,16 @@ def main():
     ap.add_argument("-z", "--zcell", type=float, default=128.0)
     ap.add_argument("bsps", nargs="+")
     a = ap.parse_args()
-    print(f"{'map':<10} {'areas':>5} {'loops':>5} {'L/area':>6} {'hubs':>4} "
-          f"{'maxdeg':>6} {'vlink':>5} {'zband':>5}  (cell={a.cell:.0f} z={a.zcell:.0f})")
+    print(f"{'map':<11} {'areas':>5} {'loops':>5} {'L/area':>6} {'bcMax':>6} {'bcGini':>6} "
+          f"{'vlink':>5} {'zband':>5}  (cell={a.cell:.0f} z={a.zcell:.0f})")
     for bsp in a.bsps:
         name = os.path.basename(bsp).replace(".bsp", "")
         try:
             r = analyze(load_graph(bsp), a.cell, a.zcell)
         except Exception as e:
             print(f"{name:<10} ERROR {e}"); continue
-        print(f"{name:<10} {r['areas']:>5} {r['loops']:>5} {r['loop_density']:>6} "
-              f"{r['hubs']:>4} {r['max_deg']:>6} {r['vlinks']:>5} {r['zbands']:>5}")
+        print(f"{name:<11} {r['areas']:>5} {r['loops']:>5} {r['loop_density']:>6} "
+              f"{r['bc_max']:>6} {r['bc_gini']:>6} {r['vlinks']:>5} {r['zbands']:>5}")
 
 if __name__ == "__main__":
     main()
