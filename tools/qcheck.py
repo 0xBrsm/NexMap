@@ -465,18 +465,19 @@ class Checker:
         return out
 
     def check_flow(self):
-        """Warn when movement topology falls outside the id corpus bands
-        (FLOW_BANDS). Dead-end-heavy or tree-like layouts are the unplayable
-        tell; flat maps get a soft note."""
+        """Warn on dead-end-heavy (spur-tree) layouts — the one early-feedback
+        signal not covered by the post-compile navmesh feature gate.
+
+        NOTE: loop_density was removed as a gate — it's a misleading descriptor
+        that rates over-connected blobs HIGHEST (the unplayable Well topped it),
+        contradicting the navmesh occlusion/chokepoint gate. "Loops, not trees"
+        stays a design principle, but flow/structure quality is owned by
+        `mapfeatures.py --gate` (occlusion, scale, chokepoints, verticality,
+        sightline variety), not by a brush-top loop count."""
         fm = self.flow_metrics()
         if fm.get("nodes", 0) < 6:
             return
-        ld = fm["loop_density"]
         de = fm["dead_end_ratio"]
-        if ld < FLOW_BANDS["loop_density"]["warn_below"]:
-            self.warn("flow", f"tree-like layout: loop density {ld:.2f} "
-                      f"(id median {FLOW_BANDS['loop_density']['median']}; "
-                      f"few circuits to run — add routes that close loops)")
         if de > FLOW_BANDS["dead_end_ratio"]["warn_above"]:
             self.warn("flow", f"dead-end-heavy: {de*100:.0f}% of the main path "
                       f"is dead ends (id <= 19%; rooms need >=2 exits)")
