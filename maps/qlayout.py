@@ -25,6 +25,13 @@ from qtheme import THEMES
 
 FACE_AXIS = {"xn": ("x", 0), "xp": ("x", 1), "yn": ("y", 0), "yp": ("y", 1)}
 
+# Comfortable stair geometry from the corpus metrics: id treads run ~step_run
+# per step_h of rise, so a gentle flight needs ~1.5 units of horizontal run per
+# unit of vertical rise. The stairs connector enforces this (extending the run
+# into the rooms when the inter-room gap alone is too short) so a terraced
+# layout can't silently produce ladder-steep steps.
+STAIR_RUN_PER_RISE = M["step_run"] / M["step_h"]
+
 
 def _wall_with_openings(fixed_lo, fixed_hi, span0, span1, z0, z1, openings,
                         tex, along):
@@ -181,9 +188,34 @@ class Connection:
     def _span_center(self, room, axis):
         return room.cy if axis == "x" else room.cx
 
+    def _abut_gap(self):
+        """Void thickness between the two facing wall shells along the
+        connection axis. ~0 means the shells abut (a door/arch seals); a
+        positive value is an open gap that only a corridor/stairs bridges."""
+        a, b = self.a, self.b
+        _, _, axis, sign = self._facing()
+        if axis == "x":
+            inner = (b.x0 - a.x1) if sign > 0 else (a.x0 - b.x1)
+        else:
+            inner = (b.y0 - a.y1) if sign > 0 else (a.y0 - b.y1)
+        return inner - (a.wall + b.wall)
+
+    def _require_abutting(self, kind):
+        gap = self._abut_gap()
+        z_off = abs(self.a.z0 - self.b.z0) > 1
+        if gap > 1 or z_off:
+            why = ("floor heights differ" if z_off
+                   else f"a {gap:g}-unit gap separates the shells")
+            raise ValueError(
+                f"qlayout: '{kind}' connection between '{self.a.name}' and "
+                f"'{self.b.name}' needs abutting, same-floor shells but {why}. "
+                f"Use connect('corridor', ...) to bridge a gap, or "
+                f"connect('stairs', ...) for a height change.")
+
     def _emit_door(self):
         a, b = self.a, self.b
         fa, fb, axis, sign = self._facing()
+        self._require_abutting("door")
         w = self.kw.get("width", M["door_w"])
         h = self.kw.get("height", M["door_h"])
         sill = self.kw.get("sill", 0)
@@ -196,6 +228,7 @@ class Connection:
     def _emit_arch(self):
         a, b = self.a, self.b
         fa, fb, axis, sign = self._facing()
+        self._require_abutting("arch")
         w = self.kw.get("width", M["door_w"] + 32)
         h = self.kw.get("height", M["door_h"] + 32)
         c = (self._span_center(a, axis) + self._span_center(b, axis)) / 2
@@ -258,6 +291,101 @@ class Connection:
             self._light_at(ents, mid, c, z0 + h - 16, a)
         else:
             self._light_at(ents, c, mid, z0 + h - 16, a)
+        return brushes, ents
+
+    def _emit_stairs(self):
+        """A sealed stair shaft between two side-by-side rooms whose floors sit
+        at DIFFERENT z0. Climbs from the lower floor to the upper floor across
+        the gap, punching each room's facing wall at its own floor height. This
+        is the vertical-link primitive: terrace rooms and verticality, extra
+        areas, and a stair chokepoint all fall out of the layout for free."""
+        a, b = self.a, self.b
+        fa, fb, axis, sign = self._facing()
+        w = self.kw.get("width", M["corridor_w"])
+        h = self.kw.get("height", M["corridor_headroom"])
+        th = a.th
+        T = a.wall
+        c = (self._span_center(a, axis) + self._span_center(b, axis)) / 2
+        lower, upper = (a, b) if a.z0 <= b.z0 else (b, a)
+        lf = fa if lower is a else fb
+        uf = fb if lower is a else fa
+        zl, zu = lower.z0, upper.z0
+        rise = zu - zl
+        # ceiling clamped under both shells so the shaft ends stay sealed
+        top_z = min(zu + h, lower.z1, upper.z1)
+        if top_z < zu + M["door_h"]:
+            raise ValueError(
+                f"qlayout: 'stairs' between '{a.name}' and '{b.name}': rooms "
+                f"too short ({h}u headroom won't fit under z1); raise a ceiling")
+        # gap between the two interior edges along the run axis
+        if axis == "x":
+            g0, g1 = sorted((a.x1 if sign > 0 else b.x1,
+                             b.x0 if sign > 0 else a.x0))
+            depth = lambda r: r.x1 - r.x0
+        else:
+            g0, g1 = sorted((a.y1 if sign > 0 else b.y1,
+                             b.y0 if sign > 0 else a.y0))
+            depth = lambda r: r.y1 - r.y0
+        on = (lambda r: r.cx) if axis == "x" else (lambda r: r.cy)
+        direction = "+" if on(upper) > on(lower) else "-"
+
+        # GENTLE SLOPE: a comfortable flight needs ~STAIR_RUN_PER_RISE of run
+        # per unit rise. The bare inter-room void is usually too short, so we
+        # extend the bottom of the flight INTO THE LOWER ROOM (a landing apron
+        # the player actually walks) instead of over-steepening. The void
+        # portion still climbs; only the lower room donates floor. Capped so it
+        # can't eat the room; if even the cap leaves it steep, warn loudly.
+        void = g1 - g0
+        want = max(self.kw.get("run", 0),
+                   rise * STAIR_RUN_PER_RISE + M["landing_depth"])
+        ext = min(max(0.0, want - void), max(0.0, 0.4 * depth(lower) - T))
+        if on(lower) < on(upper):        # lower room sits on the g0 side
+            sg0, sg1 = g0 - ext, g1
+        else:
+            sg0, sg1 = g0, g1 + ext
+        run = sg1 - sg0
+        if run > 0 and rise / run > 1.0 / STAIR_RUN_PER_RISE + 1e-6:
+            print(f"qlayout stairs {lower.name}->{upper.name}: steep climb "
+                  f"(rise {rise:g} over run {run:g}); space these rooms farther "
+                  f"apart or use a smaller tier step for a gentler flight",
+                  file=sys.stderr)
+
+        # tall openings: full shaft height on the lower side so the doorway
+        # never reads as a low slot (the playtest complaint)
+        lower.punch(lf, c - w / 2, c + w / 2, zl, top_z)
+        upper.punch(uf, c - w / 2, c + w / 2, zu, top_z)
+
+        # perpendicular overlap of the two shells: the void is sealed here by
+        # the room walls EXCEPT the central tube; we fill the flanks solid so a
+        # height difference can't leave the area below the upper floor open.
+        if axis == "x":
+            p_lo, p_hi = max(a.y0, b.y0), min(a.y1, b.y1)
+        else:
+            p_lo, p_hi = max(a.x0, b.x0), min(a.x1, b.x1)
+        tube_lo, tube_hi = c - w / 2, c + w / 2
+
+        def span(a_lo, p0, a_hi, p1, z0, z1, tex):
+            # boxes are written (x_lo,y_lo,z_lo,x_hi,y_hi,z_hi); a_* is the run
+            # axis extent, p_* the perpendicular extent.
+            if axis == "x":
+                return qgeo.box(a_lo, p0, z0, a_hi, p1, z1, tex)
+            return qgeo.box(p0, a_lo, z0, p1, a_hi, z1, tex)
+
+        pf = P.stairs_landed(*( (sg0, tube_lo, sg1, tube_hi) if axis == "x"
+                                else (tube_lo, sg0, tube_hi, sg1)),
+                             z_base=zl, z_top=zu, axis=axis, direction=direction,
+                             theme=lower.theme)
+        brushes, ents = list(pf.brushes), list(pf.ents)
+        brushes.append(span(g0, p_lo - T, g1, p_hi + T, zl - T, zl, th["floor"]))
+        brushes.append(span(g0, p_lo - T, g1, p_hi + T, top_z, top_z + T,
+                            th["ceiling"]))
+        brushes.append(span(g0, p_lo - T, g1, tube_lo, zl, top_z, th["wall"]))
+        brushes.append(span(g0, tube_hi, g1, p_hi + T, zl, top_z, th["wall"]))
+        mid = (g0 + g1) / 2
+        if axis == "x":
+            self._light_at(ents, mid, c, top_z - 16, lower)
+        else:
+            self._light_at(ents, c, mid, top_z - 16, lower)
         return brushes, ents
 
     def _light_at(self, ents, x, y, z, room):
@@ -334,6 +462,39 @@ class Layout:
                          f"each >=2 connections")
         return warns
 
+    @staticmethod
+    def _room_signature(r):
+        """Position/elevation-invariant room signature: (long side, short side,
+        height) in coarse buckets. Two rooms with the same signature read as the
+        same 'kind' of space regardless of where they sit or how they connect."""
+        w, d = abs(r.x1 - r.x0), abs(r.y1 - r.y0)
+        lo, hi = sorted((w, d))
+        return (int(hi // 128), int(lo // 128), int(abs(r.z1 - r.z0) // 64))
+
+    def room_diversity_warnings(self):
+        """Monotony check at the AUTHORING layer: flag when too many rooms share
+        one footprint/shape/height — the 'identical sparse boxes' failure the
+        compiled-geometry gates can't see (verified: room-level repetition can't
+        be recovered cleanly from a navmesh or brush soup, so we measure it here
+        where the Room objects are explicit). Design-reasoned threshold: good
+        maps rarely repeat a room, so no single room 'type' should dominate."""
+        from collections import Counter
+        n = len(self.rooms)
+        if n < 4:
+            return []
+        counts = Counter(self._room_signature(r) for r in self.rooms)
+        top_sig, top = counts.most_common(1)[0]
+        warns = []
+        if top / n > 0.34:
+            names = [r.name for r in self.rooms
+                     if self._room_signature(r) == top_sig]
+            shown = ", ".join(names[:6]) + ("..." if len(names) > 6 else "")
+            warns.append(
+                f"{top}/{n} rooms share one footprint/shape/height ({shown}) — "
+                f"vary room size, proportion, and height so each reads distinct; "
+                f"good maps rarely repeat a room")
+        return warns
+
     def _navcheck(self):
         adj = {r.name: set() for r in self.rooms}
         for c in self.conns:
@@ -363,6 +524,8 @@ class Layout:
         self._navcheck()
         for w in self.flow_warnings():
             print(f"qlayout flow: {w}", file=sys.stderr)
+        for w in self.room_diversity_warnings():
+            print(f"qlayout monotony: {w}", file=sys.stderr)
         m = qgeo.MapWriter(self.message, **{k: v for k, v in self.props.items()
                                             if k in ("wad", "worldtype",
                                                      "minlight", "sounds")})

@@ -16,6 +16,8 @@ Each feature's grounding:
   sightMed   typical sightline length                       (Hullett sightlines)
   sightCV    sightline-length variety                       (Hullett "varied sightlines")
   zband      elevation bands = vertical layering            (Hullett split-level/gallery)
+  emptyA     median nav-poly area = open/sparse floor        (high = empty boxes)
+  monoCV     nav-poly-area spread = space differentiation    (low = identical rooms)
 
 Usage: mapfeatures.py [--summary] <map.bsp> ...
 """
@@ -24,7 +26,8 @@ import os, sys, statistics
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import flowstruct, vga as vgamod
 
-COLS = ["areas", "loopDens", "bcGini", "bcMax", "visDens", "sightMed", "sightCV", "zband"]
+COLS = ["areas", "loopDens", "bcGini", "bcMax", "visDens", "sightMed", "sightCV",
+        "zband", "emptyA", "monoCV"]
 
 def features(bsp):
     f = flowstruct.analyze(flowstruct.load_graph(bsp), 256.0, 128.0)
@@ -34,6 +37,7 @@ def features(bsp):
         "bcGini": f["bc_gini"], "bcMax": f["bc_max"],
         "visDens": v["vis_density"], "sightMed": v["sight_med"], "sightCV": v["sight_cv"],
         "zband": f["zbands"],
+        "emptyA": f["poly_med_area"], "monoCV": f["poly_area_cv"],
     }
 
 # SP good-region gate, derived from the 97-map exemplar corpus (base Quake +
@@ -47,6 +51,8 @@ SP_GATE = {
     "bcGini":   ("low",  0.68, 0.74),  # below = no real chokepoints (flat betweenness)
     "zband":    ("low",  7,    11),    # below = too flat (no vertical layering)
     "sightCV":  ("low",  0.47, 0.54),  # below = uniform sightlines (no intimate/vista mix)
+    "emptyA":   ("high", 1500, 256),   # above = sparse open boxes (corpus p90=1456)
+    "monoCV":   ("low",  2.3,  3.1),   # below = identical repeated rooms (corpus p10=2.3)
 }
 
 def gate(bsp):

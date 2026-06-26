@@ -54,9 +54,10 @@ failures. The stack exists so each failure mode is fixed once, in code:
 ## Ship rubric (all seven must pass before deploy)
 
 0. **Flow & structure** — the `nexmap build` feature gate is IN BAND on all
-   five targets (see "Structural targets" below): occlusion, scale,
-   chokepoints, verticality, sightline variety. These supersede raw loop
-   density (a misleading descriptor — it rates over-connected blobs highest).
+   seven targets (see "Structural targets" below): occlusion, scale,
+   chokepoints, verticality, sightline variety, emptiness, monotony. These
+   supersede raw loop density (a misleading descriptor — it rates
+   over-connected blobs highest).
    Continuous ring walkways, bridges, and multiple stairs between tiers make
    real flow; spurs and single-entrance rooms make dead ends. A beautiful map
    that plays as a tree — or as an over-exposed blob — still fails.
@@ -81,7 +82,7 @@ failures. The stack exists so each failure mode is fixed once, in code:
 that scores the map's navmesh-derived structure against the SP good-region
 measured from 97 exemplar maps (base Quake + DOPA + Scourge of Armagon +
 Dissolution of Eternity + udob + AD). Aim for the median; a WARN means you're
-outside the range *every* shipped id-quality map sits in. The five that matter
+outside the range *every* shipped id-quality map sits in. The seven that matter
 (each a distinct failure mode our early maps hit):
 
 | target | band (p10–p90) | median | failure if outside |
@@ -91,11 +92,17 @@ outside the range *every* shipped id-quality map sits in. The five that matter
 | **chokepoints** (bc_gini) | 0.68–0.80 | 0.74 | too low = flat, no real funnels |
 | **verticality** (zband) | 7–17 | 11 | too low = flat, no layering |
 | **sightline variety** (sight_cv) | 0.47–0.64 | 0.54 | too low = uniform, no intimate/vista mix |
+| **emptiness** (emptyA, median nav-poly area) | 128–1456 | 256 | too high = sparse open boxes, vast empty floor |
+| **monotony** (monoCV, nav-poly-area spread) | 2.3–4.9 | 3.1 | too low = identical repeated rooms, no big/small mix |
+
+The last two are the *anti-scale-inflation* check: you can't pass `areas` by
+making rooms huge, because that spikes emptiness and flattens monotony. Hit
+`areas` the corpus way — MANY smaller, DIFFERENTIATED spaces — not big boxes.
 
 **Author toward these, don't debug into them.** Occlusion is the dominant one:
 break sightlines, layer space vertically, hide areas. NOTE: raw *loop density*
 is NOT a quality target — it's a descriptor that mis-rates blobs as good (our
-worst map topped it). Trust the gate's five features over loop counts.
+worst map topped it). Trust the gate's seven features over loop counts.
 
 **Selecting parts by target.** `qprefab` is a feature-tagged catalog: when a
 target is short, pull the parts that feed it — `qprefab.catalog("occlusion")`,

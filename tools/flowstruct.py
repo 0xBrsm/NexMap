@@ -8,7 +8,7 @@ structurally, as input for loop-first map authoring — not to grade a map.
 
 Usage: flowstruct.py [-c CELL] [-z ZCELL] <map.bsp> [map2.bsp ...]
 """
-import json, os, subprocess, sys, argparse
+import json, os, subprocess, sys, argparse, statistics
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -69,10 +69,21 @@ def analyze(g, cell, zcell):
     hubs = sum(1 for d in deg if d >= 4)
     zbands = len({round(sum(zs)/len(zs) / 96) for zs in cell_z.values()})
     bc = betweenness(adj, V)            # chokepoint structure
+    # Detail granularity from the raw nav-poly areas: navcheck merges open floor
+    # into BIG polys and chops detailed/cramped space into many small ones, so
+    # the poly-area distribution reads emptiness and monotony. A few huge polys
+    # = sparse open boxes (high median area); a uniform distribution = repeated
+    # identical spaces (low spread). Both were invisible to the flow/vis gates.
+    pa = [p[3] for p in polys]
+    pmean = sum(pa) / len(pa) if pa else 0
+    poly_med = statistics.median(pa) if pa else 0
+    poly_cv = statistics.pstdev(pa) / pmean if pmean else 0
     return dict(areas=V, edges=E, comps=C, loops=L,
                 loop_density=round(L / V, 2) if V else 0,
                 hubs=hubs, max_deg=max(deg) if deg else 0,
                 vlinks=vlinks, zbands=zbands,
+                poly_med_area=round(poly_med, 1),        # emptiness: big = open/sparse
+                poly_area_cv=round(poly_cv, 2),          # monotony: low = uniform spaces
                 bc_max=round(max(bc), 3) if bc else 0,   # strongest chokepoint
                 bc_gini=round(gini(bc), 2))              # concentration: high=few real chokes, low=blob
 
